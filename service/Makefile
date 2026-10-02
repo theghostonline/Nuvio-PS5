@@ -1,3 +1,6 @@
+# Nuvio PS5
+# Copyright (C) 2026 Husam Osman
+# SPDX-License-Identifier: GPL-3.0-or-later
 # nuvio-ps5: resident Nuvio companion payload for jailbroken PS5 consoles.
 #
 #   make            build nuvio-ps5.elf (web app, tile assets and CA bundle embedded)

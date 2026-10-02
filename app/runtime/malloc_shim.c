@@ -1,6 +1,7 @@
 /*
  * EVO Player - Phase 1b task 4: malloc interposer for the app module.
  * SPDX-License-Identifier: GPL-3.0-or-later
+ * Modifications Copyright (C) 2026 Husam Osman (Nuvio PS5): aligned slab pools.
  *
  * The clean-room libc.prx installs its own bounded heap mspace (via
  * _sceKernelRtldSetApplicationHeapAPI). Once EVO's cumulative allocations

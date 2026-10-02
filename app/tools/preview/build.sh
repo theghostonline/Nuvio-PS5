@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Nuvio PS5
+# Copyright (C) 2026 Husam Osman
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Builds the overlay preview on the Mac: the app's real interface code
 # (ui_*, nuvio_osd*, nuvio_subs, nuvio_session) against Homebrew's FreeType,
 # HarfBuzz, fribidi, libass, FFmpeg and image libraries. ./osd_preview then

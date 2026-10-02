@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * The Nuvio Player's frame loop.
  *
  * One playback: parse the page's request, show Nuvio's loading screen while

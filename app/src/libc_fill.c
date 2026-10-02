@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * C library functions the app's runtime does not provide.
  *
  * The native-app libc (sce_module/libc.prx plus the system modules) leaves

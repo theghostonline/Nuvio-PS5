@@ -1,3 +1,8 @@
+/*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 #include "ui_image.h"
 
 #include "evo_boot_trace.h"

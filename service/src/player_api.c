@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * The mailbox between Nuvio's page and the Nuvio app's native player.
  *
  * The app cannot listen on a socket (sandbox), and the page is gone while a

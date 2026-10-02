@@ -1,3 +1,8 @@
+/*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 #pragma once
 /*
  * Text for the Nuvio Player's overlay: Inter (Nuvio's interface font) shaped

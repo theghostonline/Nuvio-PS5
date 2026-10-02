@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * The engine's toast() messages ("OPEN FAIL", "SLOW FILE", ...). EVO drew them
  * through its RmlUi layer; the Nuvio Player logs them, and keeps the latest
  * one for its own controls to show.

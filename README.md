@@ -171,6 +171,8 @@ The result is `service/nuvio-ps5.elf`.
 
 ## License
 
-GPL-3.0 - see `LICENSE`. Third-party components and their licenses are listed
+Copyright (C) 2026 Husam Osman. Nuvio PS5 is free software under the GNU
+General Public License v3.0 or later - see `LICENSE`. Forks and derivatives
+must stay open source under the same license and keep these notices. Third-party components and their licenses are listed
 in `THIRD_PARTY_NOTICES.md`; original copyright notices are kept in the
 source files.

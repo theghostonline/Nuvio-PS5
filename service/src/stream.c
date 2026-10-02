@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * Stream repackaging for the PS5 browser.
  *
  * The PS5's WebKit decodes H.264/HEVC video and AAC/AC-3/E-AC-3 audio through

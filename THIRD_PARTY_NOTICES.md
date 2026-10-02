@@ -1,6 +1,7 @@
 # Third-party notices
 
-Nuvio PS5 is distributed under the GNU General Public License v3.0. It builds
+Nuvio PS5 - Copyright (C) 2026 Husam Osman - is distributed under the GNU
+General Public License v3.0 or later. It builds
 on, links or bundles the following components, each under its own license.
 
 ## Source in this repository
@@ -9,6 +10,7 @@ on, links or bundles the following components, each under its own license.
 | --- | --- | --- |
 | Nuvio TV web app (NuvioTVSmart) - modified by `web/nuvio-ps5.patch` | `web/` | GPL-3.0 |
 | PS5 media engine and app packaging toolkit, from an open-source GPL-3.0 PS5 media player; modified for this project in 2026 (see the history of `app/engine/` and `toolkit/`) | `app/engine/`, `toolkit/` | GPL-3.0 (original notices kept in the files and in `app/engine/LICENSE`) |
+| hbldr / elfldr payload loader, Copyright (C) 2024 John Törnblom | `service/src/hbldr/` | GPL-3.0-or-later |
 | cJSON | `app/engine/addons/src/cJSON.c` | MIT |
 | NanoSVG | `app/third_party/` | zlib |
 | Inter typeface | `app/assets/` | SIL Open Font License 1.1 |

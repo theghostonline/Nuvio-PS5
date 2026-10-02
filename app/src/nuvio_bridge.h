@@ -1,3 +1,8 @@
+/*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 #pragma once
 /*
  * The app's line to the nuvio-ps5 payload on 127.0.0.1:17600.

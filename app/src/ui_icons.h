@@ -1,3 +1,8 @@
+/*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 #pragma once
 /*
  * The overlay's icons: Nuvio's own player SVGs (assets/icons/ic_player_*)

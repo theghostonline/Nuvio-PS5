@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * Installs the native Nuvio app (PPSA99176) into /data/homebrew. The app is
  * built from ../nuvio-ps5-app (ps5-native-app-boilerplate) and embedded here
  * as a tar.gz, so one payload sets everything up. ShadowMountPlus notices the

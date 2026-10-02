@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * Screenshots for the test loop: the frame on the panel, as a 24-bit BMP
  * posted to the payload (GET /api/debug/shot reads it back). A 4K output is
  * halved to 1920x1080 so the file stays under the payload's 8 MB body limit.

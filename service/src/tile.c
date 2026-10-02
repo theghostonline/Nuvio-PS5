@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * Nuvio on the home screen.
  *
  * Current builds install the native Nuvio app (PPSA99176, built from

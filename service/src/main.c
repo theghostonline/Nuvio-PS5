@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * nuvio-ps5: resident companion payload for Nuvio TV on a jailbroken PS5.
  *
  *  - serves the PS5 build of Nuvio TV (NuvioMedia/NuvioTVSmart) on

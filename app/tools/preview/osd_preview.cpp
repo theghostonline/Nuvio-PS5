@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * Renders the Nuvio Player's interface to PNGs on the Mac, from the same code
  * the app runs: each state (loading, controls, seeking, pause overlay, the
  * panels, next episode, skip intro, error, subtitles) over a video frame.

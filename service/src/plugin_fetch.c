@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * Native replacement for Nuvio TV's services/plugin-http.cjs.
  *
  * The web app runs plugins (scrapers) in a QuickJS worker; every network call

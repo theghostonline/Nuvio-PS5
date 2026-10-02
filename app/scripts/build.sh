@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Nuvio PS5
+# Copyright (C) 2026 Husam Osman
+# SPDX-License-Identifier: GPL-3.0-or-later
 # =============================================================================
 # app/scripts/build.sh - build the Nuvio app (PPSA99176): the web UI
 # host plus the Nuvio Player (EVO Player's playback engine, vendored in

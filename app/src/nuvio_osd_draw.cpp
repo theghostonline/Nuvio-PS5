@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * The Nuvio Player's interface: drawing. Sizes, colours and spacing are
  * NuvioTVSmart's Android TV player port (css/components-29..37, the
  * "ATV dp x2" values for a 1920x1080 canvas), so the native controls look

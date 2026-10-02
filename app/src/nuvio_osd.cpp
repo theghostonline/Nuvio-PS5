@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * The Nuvio Player's interface: state and input. Drawing is in
  * nuvio_osd_draw.cpp. Behaviour follows NuvioTVSmart's player screen
  * (js/ui/screens/player/playerScreenMethods-71-on-key-down.js and friends):

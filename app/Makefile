@@ -1,3 +1,6 @@
+# Nuvio PS5
+# Copyright (C) 2026 Husam Osman
+# SPDX-License-Identifier: GPL-3.0-or-later
 # app: object build only. scripts/build.sh drives this with the PS5 SDK
 # and does the link, PS5 conversion and signing.
 #

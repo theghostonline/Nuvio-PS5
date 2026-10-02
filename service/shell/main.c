@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * nuvio-shell: runs as Nuvio's foreground app (BigApp, launched by the
  * nuvio-ps5 payload through hbldr) and shows the Nuvio web app full screen in
  * the PS5's system browser dialog, without the windowed browser's title bar.

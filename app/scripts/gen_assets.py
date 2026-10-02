@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Nuvio PS5
+# Copyright (C) 2026 Husam Osman
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Regenerates src/ui_assets.{h,c}: every file listed below and every
 assets/icons/*.svg, compiled into the eboot with .incbin (paths relative to
 nuvio-app/, where make runs). Run after adding or renaming an asset."""
@@ -49,8 +52,8 @@ def main():
                  "(size_t)(nuvio_blob_%s_end - nuvio_blob_%s) - 1};\n    return a;\n}\n"
                  % (name, name, name, name))
     h += ["", "#ifdef __cplusplus", "}", "#endif", ""]
-    open("src/ui_assets.h", "w").write("\n".join(h))
-    open("src/ui_assets.c", "w").write("\n".join(c))
+    open("src/ui_assets.h", "w").write("/*\n * Nuvio PS5\n * Copyright (C) 2026 Husam Osman\n * SPDX-License-Identifier: GPL-3.0-or-later\n */\n" + "\n".join(h))
+    open("src/ui_assets.c", "w").write("/*\n * Nuvio PS5\n * Copyright (C) 2026 Husam Osman\n * SPDX-License-Identifier: GPL-3.0-or-later\n */\n" + "\n".join(c))
     # The Makefile rebuilds ui_assets.o when any of these change.
     open("build-assets.mk", "w").write(
         "ASSET_FILES := " + " ".join(p for _, p in assets) + "\n")

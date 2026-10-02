@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * EVO Player features the vendored engine still calls but the Nuvio Player
  * has no use for. Each is the "not there" answer the engine already handles.
  */

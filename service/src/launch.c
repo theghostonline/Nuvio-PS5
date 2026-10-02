@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * Full-screen launch: the tile deeplink hits /launch, and this starts
  * nuvio-shell (embedded) as the foreground BigApp through hbldr. The shell
  * opens the web app in the system browser dialog covering the whole screen.

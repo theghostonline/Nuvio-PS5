@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * Nuvio for PS5 (PPSA99176).
  *
  * Nuvio's interface is its TV web app, served by the nuvio-ps5 payload and

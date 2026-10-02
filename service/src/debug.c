@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * Test-loop helpers. The routes that reach these are loopback-only unless
  * /data/nuvio/lan-debug exists (see http.c), so a release console never
  * exposes them to the network.

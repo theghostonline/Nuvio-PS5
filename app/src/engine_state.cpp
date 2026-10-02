@@ -1,4 +1,9 @@
 /*
+ * Nuvio PS5
+ * Copyright (C) 2026 Husam Osman
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+/*
  * The playback engine's shared state.
  *
  * EVO Player's engine (engine/) still talks through a set of globals and a few
