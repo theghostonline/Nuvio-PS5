@@ -1,6 +1,6 @@
 # Nuvio PS5
 
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy_Me_a_Coffee-Support_this_port-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/DeiC6O8YM3)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy_Me_a_Coffee-Support_this_port-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/theghostonline)
 
 Nuvio, at home on the PlayStation 5: the full Nuvio TV interface as a PS5 app,
 with a native 4K HDR player built for the console's own video hardware.
@@ -128,7 +128,7 @@ on real hardware, one stream, codec and console quirk at a time. If it's
 become how you watch on your PS5, a coffee helps cover the cost of building
 it and keeps the updates coming.
 
-<a href="https://buymeacoffee.com/DeiC6O8YM3"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="50"></a>
+<a href="https://buymeacoffee.com/theghostonline"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="50"></a>
 
 Not able to donate? A star on the repository and a bug report with the
 source type, codec and HDR format help just as much.
