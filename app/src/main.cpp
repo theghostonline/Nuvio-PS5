@@ -237,6 +237,8 @@ int main()
     bool after_play = false;
     for (;;) {
         if (nuvio_webui_open(after_play ? "/?ps5return=1" : "/") != 0) {
+            if (nuvio_control_quit_requested())   /* a quit must not wait on the browser */
+                return shutdown_app();
             notify("Nuvio: the browser could not open");
             usleep(3 * 1000 * 1000);
             continue;

@@ -21,6 +21,9 @@
 #include <libavcodec/avcodec.h>
 #include <libavutil/frame.h>
 #include <libavutil/pixfmt.h>
+#ifdef NUVIO_APP
+#include "dv_rpu.h"
+#endif
 
 #ifndef FF_PROFILE_UNKNOWN
 #define FF_PROFILE_UNKNOWN (-99)
@@ -51,6 +54,7 @@ struct evo_vdec {
     evo_vdec_stats stats;
     uint64_t       pending_us;
 };
+
 
 /* ---------------------------------------------------------------------------
  * #8 — decode timing at the seam
@@ -345,7 +349,6 @@ static int vdec_send_inner(evo_vdec *v, const uint8_t *data, int size, int64_t p
         return evo_vdec_native_send(v->nat, data, size, pts_us);
     if (!v->ctx)
         return -1;
-
     av_packet_unref(v->pkt);
 
     int flush = !(data && size > 0);
@@ -416,6 +419,14 @@ static int vdec_receive_inner(evo_vdec *v, pp_frame *out)
     else if (frame->pts != AV_NOPTS_VALUE)
         pts_us = frame->pts;
 
+#ifdef NUVIO_APP
+    if (dv_session_active()) {
+        AVFrameSideData *sd = av_frame_get_side_data(frame, AV_FRAME_DATA_DOVI_METADATA);
+        dv_params dvp;
+        if (sd && dv_from_avdovi(sd->data, &dvp) == 0)
+            dv_store(pts_us, &dvp);
+    }
+#endif
     if (pp_map_avframe(frame, out, pts_us) == 0)
         return 1;
 

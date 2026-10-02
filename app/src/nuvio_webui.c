@@ -123,6 +123,21 @@ int nuvio_webui_open(const char *path)
     snprintf(s_url, sizeof s_url, "http://127.0.0.1:%d%s", NUVIO_SERVICE_PORT,
              (path && path[0] == '/') ? path : "/");
     rc = open_mode(2);
+    if (rc == (int)0x80b80006) {
+        /* Busy: a dialog is still up. A Close that had not finished when
+         * playback took over leaves it running - adopt it; a finished one is
+         * closed and opened again. */
+        const int status = sceWebBrowserDialogUpdateStatus();
+        evo_bt("webui: open busy, dialog status %d", status);
+        if (status == STATUS_RUNNING || status == STATUS_INITIALIZED) {
+            s_open = 1;
+            return 0;
+        }
+        sceWebBrowserDialogClose();
+        for (int i = 0; i < 60 && sceWebBrowserDialogUpdateStatus() == STATUS_RUNNING; i++)
+            usleep(16 * 1000);
+        rc = open_mode(2);
+    }
     if (rc != 0) {
         evo_bt("webui: full-screen open -> 0x%08x, trying the default layout", (unsigned)rc);
         rc = open_mode(1);

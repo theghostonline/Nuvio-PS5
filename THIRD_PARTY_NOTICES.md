@@ -11,6 +11,7 @@ on, links or bundles the following components, each under its own license.
 | Nuvio TV web app (NuvioTVSmart) - modified by `web/nuvio-ps5.patch` | `web/` | GPL-3.0 |
 | PS5 media engine and app packaging toolkit, from an open-source GPL-3.0 PS5 media player; modified for this project in 2026 (see the history of `app/engine/` and `toolkit/`) | `app/engine/`, `toolkit/` | GPL-3.0 (original notices kept in the files and in `app/engine/LICENSE`) |
 | hbldr / elfldr payload loader, Copyright (C) 2024 John Törnblom | `service/src/hbldr/` | GPL-3.0-or-later |
+| Dolby Vision RPU parsing and reconstruction maths, following FFmpeg (`libavcodec/dovi_rpudec.c`) and libplacebo | `app/src/dv_rpu.c` | LGPL-2.1-or-later (sources), combined under GPL-3.0 |
 | cJSON | `app/engine/addons/src/cJSON.c` | MIT |
 | NanoSVG | `app/third_party/` | zlib |
 | Inter typeface | `app/assets/` | SIL Open Font License 1.1 |

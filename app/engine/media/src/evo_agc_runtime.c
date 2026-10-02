@@ -1,4 +1,7 @@
 #include "evo_agc_runtime.h"
+#ifdef NUVIO_APP
+#include "dv_rpu.h"
+#endif
 #include "evo_agc_shader_header.h"
 #include "evo_agc_pipes.h"
 #include "evo_boot_log.h"
@@ -1255,6 +1258,12 @@ int evo_agc_runtime_init(int width, int height, int hdr)
         {EVO_AGC_PIPE_VIDEO_HDR,    &video_yuv_p010_hdr_metadata, "video_yuv_p010_hdr"},
         {EVO_AGC_PIPE_VIDEO_HLG,    &video_yuv_p010_hlg_metadata, "video_yuv_p010_hlg"},
         {EVO_AGC_PIPE_VIDEO_P010_SDR, &video_yuv_p010_sdr_metadata, "video_yuv_p010_sdr"},
+#if defined(NUVIO_APP) && __has_include("video_yuv_p010_dv5_pipe.h")
+        /* Compiled by tools/build_agc_pipes.py (amdllpc). Without the headers the
+         * DV5 pipelines stay invalid and profile 5 plays tone-mapped as before. */
+        {EVO_AGC_PIPE_VIDEO_DV5,    &video_yuv_p010_dv5_metadata,        "video_yuv_p010_dv5"},
+        {EVO_AGC_PIPE_VIDEO_DV5_PQ, &video_yuv_p010_dv5_pq_out_metadata, "video_yuv_p010_dv5_pq_out"},
+#endif
         /* real HDR10 output; missing ones just keep playback tone-mapped SDR */
         {EVO_AGC_PIPE_VIDEO_HDR_PQ, &video_yuv_p010_pq_out_metadata,     "video_yuv_p010_pq_out"},
         {EVO_AGC_PIPE_VIDEO_HLG_PQ, &video_yuv_p010_hlg_pq_out_metadata, "video_yuv_p010_hlg_pq_out"},
@@ -1803,6 +1812,7 @@ static int agc_hdr_remap(int pipeline_id)
     case EVO_AGC_PIPE_UI:         to = EVO_AGC_PIPE_UI_PQ; break;
     case EVO_AGC_PIPE_VIDEO_HDR:  to = EVO_AGC_PIPE_VIDEO_HDR_PQ; break;
     case EVO_AGC_PIPE_VIDEO_HLG:  to = EVO_AGC_PIPE_VIDEO_HLG_PQ; break;
+    case EVO_AGC_PIPE_VIDEO_DV5:  to = EVO_AGC_PIPE_VIDEO_DV5_PQ; break;
     case EVO_AGC_PIPE_NV12_HDR:   to = EVO_AGC_PIPE_NV12_HDR_PQ; break;
     case EVO_AGC_PIPE_NV12_HLG:   to = EVO_AGC_PIPE_NV12_HLG_PQ; break;
     default: break;
@@ -2021,6 +2031,7 @@ void evo_agc_flush_color_target(void)
         return;
     evo_agc_writer_flush_color_target(&g_agc_dev.current_cb);
 }
+
 
 void evo_agc_runtime_frame_end(void)
 {
@@ -3786,6 +3797,7 @@ int evo_agc_upscale_take_downgrade(void)
     return v;
 }
 
+
 /* The Off quad's NDC half-extents for Fit (0) / Fill (1) / Stretch (2). */
 static void agc_video_scale(int disp_w, int disp_h, int view_mode, float *sx, float *sy)
 {
@@ -3822,6 +3834,28 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
     const uint32_t slot = g_agc_dev.current_slot;
     evo_agc_transient_ring_t *ring = &g_agc_dev.transient_ring;
 
+#ifdef NUVIO_APP
+    /* Dolby Vision profile 5: rebuilt to BT.2020 PQ in the shader, from this
+     * frame's RPU parameters (src/dv_rpu.c). Shown as HDR10 from here on. */
+    dv_params dv;
+    const int dv5 = ten_bit && !planar && dv_session_active() &&
+                    g_agc_dev.pipelines[EVO_AGC_PIPE_VIDEO_DV5].valid &&
+                    dv_lookup(pts_us, &dv);
+    if (dv5)
+        color_trc = 16;
+    {
+        static int s_dv5_logged;
+        if (dv5 && !s_dv5_logged) {
+            s_dv5_logged = 1;
+            evo_boot_log("dv5: drawing with the profile 5 pipeline (pts %lld)", (long long)pts_us);
+        } else if (!dv5) {
+            s_dv5_logged = 0;
+        }
+    }
+#else
+    const int dv5 = 0;
+#endif
+
     /* HDR is the transfer, not the bit depth: 8-bit HEVC does carry HLG
      * (a broadcast 4K HLG channel, hardware 2026-09-28). */
     const int hdr_src = (color_trc == 16 || color_trc == 18);
@@ -3829,7 +3863,9 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
 
     /* 1. Select Pipeline */
     int pipe_id;
-    if (ten_bit) {
+    if (dv5) {
+        pipe_id = EVO_AGC_PIPE_VIDEO_DV5;
+    } else if (ten_bit) {
         if (color_trc == 16)
             pipe_id = EVO_AGC_PIPE_VIDEO_HDR;
         else if (color_trc == 18)
@@ -3973,14 +4009,16 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
         }
     } else {
         /* NV12 / P010 2-plane: 96 bytes descriptor table (2 * 48B).
-         * Used for NV12 (SDR 8-bit), NV12_10 (HDR 10-bit), and planar 10-bit (interleaved to RG16). */
-        if (evo_agc_transient_ring_alloc(ring, slot, 96, 16, &desc_slice) != EVO_AGC_TRANSIENT_OK) {
+         * Used for NV12 (SDR 8-bit), NV12_10 (HDR 10-bit), and planar 10-bit (interleaved to RG16).
+         * Dolby Vision profile 5 adds a third entry: the RPU coefficients. */
+        const uint32_t table_bytes = dv5 ? 144u : 96u;
+        if (evo_agc_transient_ring_alloc(ring, slot, table_bytes, 16, &desc_slice) != EVO_AGC_TRANSIENT_OK) {
             evo_boot_log("agc_blit_yuv: 2-plane desc_slice alloc failed");
             evo_boot_log_flush();
             return -1;
         }
         uint32_t *desc = (uint32_t *)desc_slice.cpu;
-        memset(desc, 0, 96);
+        memset(desc, 0, table_bytes);
 
         uint32_t uv_pitch_gpu = 0;
         uint64_t uv_gpu = 0;
@@ -4013,6 +4051,24 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
                          : evo_agc_build_tsharp_rg8(desc + 12, uv_gpu, cw2, ch2, uv_pitch_gpu);
         evo_agc_build_ssharp(desc + 20, 1, 1);
 
+#ifdef NUVIO_APP
+        if (dv5) {
+            /* Binding 2: one float per RG16 texel (gen_dv5_pipes.py). */
+            evo_agc_transient_slice_t dv_slice;
+            if (evo_agc_transient_ring_alloc(ring, slot, DV_TEX_FLOATS * 4u, 256,
+                                             &dv_slice) != EVO_AGC_TRANSIENT_OK) {
+                evo_boot_log("agc_blit_yuv: dv coefficient alloc failed");
+                return -1;
+            }
+            dv_pack_texture(&dv, (float *)dv_slice.cpu);
+            if (evo_agc_build_tsharp_rg16(desc + 24, dv_slice.gpu_addr, DV_TEX_FLOATS, 1,
+                                          DV_TEX_FLOATS * 4u) != 0) {
+                evo_boot_log("agc_blit_yuv: dv coefficient tsharp failed");
+                return -1;
+            }
+            evo_agc_build_ssharp(desc + 32, 1, 0);
+        }
+#endif
         if (r0 != 0 || r1 != 0) {
             evo_boot_log("agc_blit_yuv: build 2-plane tsharp failed rc=%d/%d", r0, r1);
             evo_boot_log_flush();
@@ -4052,4 +4108,10 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
      * quad until the buffer it is about to draw into holds something else. */
     evo_agc_runtime_note_video_pts(pts_us);
     return 0;
+}
+
+int evo_agc_runtime_pipeline_valid(int pipeline_id)
+{
+    return pipeline_id >= 0 && pipeline_id < EVO_AGC_PIPE_COUNT &&
+           g_agc_dev.pipelines[pipeline_id].valid;
 }

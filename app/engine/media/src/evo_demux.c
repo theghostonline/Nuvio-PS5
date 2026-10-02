@@ -8,6 +8,7 @@
  * below.
  */
 #include "evo_demux.h"
+#include "evo_thread.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -420,9 +421,8 @@ packet_queue_clear(
         ) {
             audio_decode_thread_running = 1;
 
-            pthread_create(
+            evo_thread_create(
                 &audio_decode_thread,
-                NULL,
                 audio_decode_thread_func,
                 NULL
             );

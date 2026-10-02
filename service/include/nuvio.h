@@ -9,7 +9,7 @@
 #include <stdint.h>
 
 /* Service version; bump with every payload release. */
-#define NUVIO_PS5_VERSION "1.7.1"
+#define NUVIO_PS5_VERSION "1.7.2"
 
 /* Must match PS5_SERVICE_PORT in the web app (js/platform/ps5/ps5Service.js)
  * and the deeplink in assets/param.json. Never change it: the browser keys
@@ -73,6 +73,8 @@ void *nuvio_debug_shot_copy(size_t *len);
 
 /* debug.c: test-loop helpers, reachable from the LAN only with the flag. */
 char *nuvio_debug_launch_app(int *status);
+/* Process list (pid <= 0) or one process's threads, as text lines. */
+char *nuvio_debug_threads(int pid, size_t *len);
 
 /* tile.c: removes the web-link tile (NUVI00001) used up to 1.0.2. */
 int nuvio_tile_uninstall(void);

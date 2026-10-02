@@ -115,15 +115,45 @@ static enum MHD_Result send_text(struct MHD_Connection *conn, int status, const 
 
 /* MHD_create_response_from_fd uses sendfile(), which stalls after ~32 KiB on
  * the PS5, so file bodies are streamed with pread() through a callback. */
+typedef struct {
+  int fd;
+  uint64_t base;      /* first byte of the body: a Range request starts mid-file */
+} file_body_t;
+
 static ssize_t read_file_block(void *cls, uint64_t pos, char *buf, size_t max) {
-  ssize_t n = pread((int)(intptr_t)cls, buf, max, (off_t)pos);
+  file_body_t *b = cls;
+  ssize_t n = pread(b->fd, buf, max, (off_t)(b->base + pos));
   if (n == 0)
     return MHD_CONTENT_READER_END_OF_STREAM;
   return n < 0 ? MHD_CONTENT_READER_END_WITH_ERROR : n;
 }
 
 static void close_file(void *cls) {
-  close((int)(intptr_t)cls);
+  file_body_t *b = cls;
+  close(b->fd);
+  free(b);
+}
+
+/* "bytes=a-b", "bytes=a-" or "bytes=-n" -> [*start, *end] inclusive; 0 if absent
+ * or not a single satisfiable range (the whole file is sent then). */
+static int parse_range(const char *h, uint64_t size, uint64_t *start, uint64_t *end) {
+  unsigned long long a = 0, b = 0;
+  if (!h || strncmp(h, "bytes=", 6) || strchr(h, ',') || !size)
+    return 0;
+  h += 6;
+  if (*h == '-') {
+    if (sscanf(h + 1, "%llu", &b) != 1 || !b)
+      return 0;
+    *start = b >= size ? 0 : size - b;
+    *end = size - 1;
+    return 1;
+  }
+  int n = sscanf(h, "%llu-%llu", &a, &b);
+  if (n < 1 || a >= size)
+    return 0;
+  *start = a;
+  *end = (n == 2 && b < size) ? b : size - 1;
+  return *end >= *start;
 }
 
 static void http_date(time_t when, char *out, size_t size) {
@@ -172,17 +202,35 @@ static enum MHD_Result serve_static(struct MHD_Connection *conn, const char *url
 
   if ((fd = open(path, O_RDONLY)) < 0)
     return send_text(conn, 404, "Not found\n");
-  resp = MHD_create_response_from_callback((uint64_t)st.st_size, 64 * 1024, read_file_block,
-                                           (void *)(intptr_t)fd, close_file);
-  if (!resp) {
+  /* Byte ranges: players seek in media files (an MP4 index at the end, scrubbing). */
+  uint64_t r0 = 0, r1 = 0;
+  const int ranged = parse_range(MHD_lookup_connection_value(conn, MHD_HEADER_KIND, "Range"),
+                                 (uint64_t)st.st_size, &r0, &r1);
+  file_body_t *body = malloc(sizeof *body);
+  if (!body) {
     close(fd);
     return send_text(conn, 500, "Response failed\n");
+  }
+  body->fd = fd;
+  body->base = ranged ? r0 : 0;
+  resp = MHD_create_response_from_callback(ranged ? r1 - r0 + 1 : (uint64_t)st.st_size,
+                                           256 * 1024, read_file_block, body, close_file);
+  if (!resp) {
+    close_file(body);
+    return send_text(conn, 500, "Response failed\n");
+  }
+  MHD_add_response_header(resp, "Accept-Ranges", "bytes");
+  if (ranged) {
+    char cr[96];
+    snprintf(cr, sizeof(cr), "bytes %llu-%llu/%llu", (unsigned long long)r0,
+             (unsigned long long)r1, (unsigned long long)st.st_size);
+    MHD_add_response_header(resp, "Content-Range", cr);
   }
   MHD_add_response_header(resp, "Content-Type", mime_for(path));
   MHD_add_response_header(resp, "Last-Modified", last_modified);
   /* Revalidate every load: builds are swapped in place by the payload. */
   MHD_add_response_header(resp, "Cache-Control", "no-cache");
-  ret = MHD_queue_response(conn, MHD_HTTP_OK, resp);
+  ret = MHD_queue_response(conn, ranged ? MHD_HTTP_PARTIAL_CONTENT : MHD_HTTP_OK, resp);
   MHD_destroy_response(resp);
   return ret;
 }
@@ -443,6 +491,14 @@ static enum MHD_Result handle_request(struct MHD_Connection *conn, const char *u
     char *req = nuvio_debug_last_request(&len);
     return req ? send_buffer(conn, 200, "application/json", req, len, MHD_RESPMEM_MUST_FREE)
                : send_text(conn, 404, "No request\n");
+  }
+
+  if (!strcmp(url, "/api/debug/threads")) {
+    const char *pid = MHD_lookup_connection_value(conn, MHD_GET_ARGUMENT_KIND, "pid");
+    size_t len = 0;
+    char *text = nuvio_debug_threads(pid ? atoi(pid) : 0, &len);
+    return text ? send_buffer(conn, 200, "text/plain", text, len, MHD_RESPMEM_MUST_FREE)
+                : send_text(conn, 500, "No process table\n");
   }
 
   if (!strcmp(url, "/api/debug/launch") && !strcmp(method, "POST")) {

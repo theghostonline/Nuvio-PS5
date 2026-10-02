@@ -56,6 +56,9 @@
  */
 #include "evo_vdec_native.h"
 #include "evo_boot_log.h"
+#ifdef NUVIO_APP
+#include "dv_rpu.h"
+#endif
 
 #ifdef EVO_APP_MODULE
 
@@ -595,6 +598,11 @@ static int slot_bringup(struct dec_slot *s, const nat_codec_desc *d,
     config.max_level            = (w > 1920 || h > 1088)
                                       ? (g_tune.level4k > 0 ? g_tune.level4k : d->level_4k)
                                       : d->level_1080;
+    /* Level 5.1 caps a picture at 8,912,896 luma samples: a 3840x3840 stereo
+     * 360 or an 8K frame needs HEVC level 6.1 (183 on the x30 scale). */
+    if (d->codec_type == SCE_VIDEODEC2_CODEC_HEVC && (int64_t)w * h > 8912896 &&
+        g_tune.level4k <= 0)
+        config.max_level = 183;
     config.max_width            = w;
     config.max_height           = h;
     config.max_dpb_frames       = g_tune.dpb > 0 ? g_tune.dpb
@@ -1349,6 +1357,14 @@ static int decode_one(evo_vdec_native *n, const uint8_t *au, int size,
      * no PTS consumed for it - it is not a frame anyone can be shown. */
     if (drop_undecodable_leading(n, au, size))
         return 0;
+
+#ifdef NUVIO_APP
+    /* Dolby Vision profile 5: the RPU in this access unit describes this
+     * picture; it is parsed here, before the cleaning below removes it. */
+    if (present && pts != INT64_MIN && n->desc->codec_type == SCE_VIDEODEC2_CODEC_HEVC &&
+        dv_session_active())
+        dv_session_parse_au(au, size, pts);
+#endif
 
     unsigned islot = n->au_ring % PIPELINE_BUFFER_COUNT;
     unsigned fslot = n->au_ring % FRAME_POOL_SLOTS;

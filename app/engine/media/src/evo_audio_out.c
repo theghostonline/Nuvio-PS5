@@ -73,10 +73,11 @@ long long now_ms(void);
  * Audio-out session state (exported via evo_audio_out.h).
  * ------------------------------------------------------------------------ */
 int audio_handle = -1;
-static int16_t audio_accum[2048 * EVO_AUDIO_MAX_CH];
+static evo_pcm_t audio_accum[2048 * EVO_AUDIO_MAX_CH];
 int audio_accum_pos = 0;
 
-static int16_t audio_queue[AUDIO_QUEUE_BLOCKS][AUDIO_BLOCK_SAMPLES * EVO_AUDIO_MAX_CH];
+static evo_pcm_t audio_queue[AUDIO_QUEUE_BLOCKS][AUDIO_BLOCK_SAMPLES * EVO_AUDIO_MAX_CH];
+int evo_audio_port_float = 1;
 volatile int audio_queue_read = 0;
 volatile int audio_queue_write = 0;
 volatile int audio_queue_count = 0;
@@ -121,7 +122,7 @@ volatile int audio_decode_thread_running = 0;
 pthread_t audio_decode_thread;
 
 
-static void audio_queue_push(int16_t *buf) {
+static void audio_queue_push(evo_pcm_t *buf) {
     int spins = 0;
     /* Wait for space instead of dropping — drops cause choppy audio on UHD */
     while (audio_queue_count >= AUDIO_QUEUE_BLOCKS &&
@@ -132,18 +133,15 @@ static void audio_queue_push(int16_t *buf) {
     if (audio_queue_count >= AUDIO_QUEUE_BLOCKS)
         return;
 
-    /* #106: the Surround Studio's measured per-speaker level + delay trims.
-     * A no-op unless the port is 8-channel and a profile was applied. */
-    evo_speaker_cal_process(buf, AUDIO_BLOCK_SAMPLES, evo_audio_channels);
-
     memcpy(audio_queue[audio_queue_write], buf,
-           (size_t)AUDIO_BLOCK_SAMPLES * evo_audio_channels * sizeof(int16_t));
+           (size_t)AUDIO_BLOCK_SAMPLES * evo_audio_channels * sizeof(evo_pcm_t));
     audio_queue_write = (audio_queue_write + 1) % AUDIO_QUEUE_BLOCKS;
     audio_queue_count++;
 }
 
 void *audio_output_thread(void *arg) {
-    static int16_t silence[AUDIO_BLOCK_SAMPLES * EVO_AUDIO_MAX_CH];
+    static evo_pcm_t silence[AUDIO_BLOCK_SAMPLES * EVO_AUDIO_MAX_CH];
+    static int16_t s16_block[AUDIO_BLOCK_SAMPLES * EVO_AUDIO_MAX_CH];
     /*
      * State for the "video is not advancing" escape on the throttle below.
      * Video's own audio-master wait has the mirror of this (stuck_iters in
@@ -239,7 +237,21 @@ void *audio_output_thread(void *arg) {
                 continue;
             }
             if (audio_queue_count > 0) {
-                sceAudioOutOutput(audio_handle, audio_queue[audio_queue_read]);
+                const evo_pcm_t *blk = audio_queue[audio_queue_read];
+                if (evo_audio_port_float) {
+                    sceAudioOutOutput(audio_handle, blk);
+                } else {
+                    /* S16 port fallback: convert this block. 32768 is the
+                     * inverse of the decoders' s16 -> float scale, so 16-bit
+                     * sources come back bit for bit; rounded, not truncated. */
+                    const int n = AUDIO_BLOCK_SAMPLES * evo_audio_channels;
+                    for (int i = 0; i < n; i++) {
+                        const float v = blk[i] * 32768.0f;
+                        s16_block[i] = v >= 32767.0f ? 32767 : v <= -32768.0f ? -32768
+                                     : (int16_t)(v + (v >= 0.0f ? 0.5f : -0.5f));
+                    }
+                    sceAudioOutOutput(audio_handle, s16_block);
+                }
                 audio_samples_played += AUDIO_BLOCK_SAMPLES;
                 audio_clock_seconds = (double)audio_samples_played / 48000.0;
                 audio_queue_read = (audio_queue_read + 1) % AUDIO_QUEUE_BLOCKS;
@@ -347,7 +359,7 @@ static void mix_audio_frame_to_queue(
     static size_t   output_buffer_cap;
 
     size_t need = (size_t)output_capacity * (size_t)evo_audio_channels *
-                  sizeof(int16_t);
+                  sizeof(evo_pcm_t);
     if (need > output_buffer_cap) {
         uint8_t *grown = (uint8_t *)av_realloc(output_buffer, need);
         if (!grown) {
@@ -372,7 +384,7 @@ static void mix_audio_frame_to_queue(
         );
 
     if (converted > 0) {
-        const int16_t *samples = (const int16_t *)output_buffer;
+        const evo_pcm_t *samples = (const evo_pcm_t *)output_buffer;
         const int ch = evo_audio_channels;
         int index = 0;
 
@@ -392,7 +404,7 @@ static void mix_audio_frame_to_queue(
 
             memcpy(&audio_accum[(size_t)audio_accum_pos * ch],
                    &samples[(size_t)index * ch],
-                   (size_t)run * (size_t)ch * sizeof(int16_t));
+                   (size_t)run * (size_t)ch * sizeof(evo_pcm_t));
 
             audio_accum_pos += run;
             audio_samples_decoded += run;

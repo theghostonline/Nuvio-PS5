@@ -1,8 +1,8 @@
 diff --git a/css/layout.css b/css/layout.css
-index e69de29..5e197df 100644
+index e69de29..2cdb226 100644
 --- a/css/layout.css
 +++ b/css/layout.css
-@@ -0,0 +1,8 @@
+@@ -0,0 +1,15 @@
 +
 +/* PS5 app: the native player is taking over - nothing of the web player shows. */
 +#player.player-ps5-native-handoff {
@@ -10,6 +10,13 @@ index e69de29..5e197df 100644
 +}
 +#player.player-ps5-native-handoff > * {
 +  visibility: hidden !important;
++}
++
++/* PS5 browser: while the D-pad is in use the cursor plays no part (see
++   ps5Input.js), so it is hidden until the left stick moves it again. */
++html.ps5-dpad-mode,
++html.ps5-dpad-mode * {
++  cursor: none !important;
 +}
 diff --git a/index.html b/index.html
 index cddc462..f4e4f4c 100644
@@ -24,7 +31,7 @@ index cddc462..f4e4f4c 100644
      <script>
        (function configureTizenLaunch() {
 diff --git a/js/app.js b/js/app.js
-index a91a114..64aa574 100644
+index a91a114..329190e 100644
 --- a/js/app.js
 +++ b/js/app.js
 @@ -19,6 +19,7 @@ import { renderAddonRemotePage } from "./bootstrap/renderAddonRemotePage.js";
@@ -55,7 +62,7 @@ index a91a114..64aa574 100644
    hasSelectedProfileThisSession = true;
    const profiles = await ProfileManager.getProfiles();
    const activeProfileId = ProfileManager.getActiveProfileId();
-@@ -271,6 +276,20 @@ async function enterWithLastProfile({ restoreWebOsRoute = false } = {}) {
+@@ -271,6 +276,24 @@ async function enterWithLastProfile({ restoreWebOsRoute = false } = {}) {
        : null;
    const isHomeResumeRoute = resumeRoute?.route === "home";
  
@@ -65,10 +72,14 @@ index a91a114..64aa574 100644
 +    // carries on (back to Sources/Detail, next episode, or the error).
 +    const savedStack = Array.isArray(ps5NativeReturn.context?.stack) ? ps5NativeReturn.context.stack : [];
 +    Router.stack = savedStack.filter((entry) => entry && entry.route && Router.routes?.[entry.route]);
++    // The reopened page starts with an empty browser history, and Back walks
++    // that history: write one entry per restored screen, as the original
++    // navigation did, so Back leads through them to Home again.
++    const restoredHistory = mirrorPs5RouteHistory(Router.stack);
 +    await Router.navigate(
 +      "player",
 +      { ...(ps5NativeReturn.context.playerParams || {}), ps5NativeReturn },
-+      { replaceHistory: true, skipStackPush: true }
++      { replaceHistory: !restoredHistory, skipStackPush: true }
 +    );
 +    return;
 +  }
@@ -76,10 +87,34 @@ index a91a114..64aa574 100644
    if (experienceRoute !== "home") {
      await Router.navigate(experienceRoute, {}, { replaceHistory: true, skipStackPush: true });
    } else if (resumeRoute?.route && !isHomeResumeRoute) {
-@@ -286,8 +305,44 @@ async function enterWithLastProfile({ restoreWebOsRoute = false } = {}) {
+@@ -286,8 +309,78 @@ async function enterWithLastProfile({ restoreWebOsRoute = false } = {}) {
    }
  }
  
++function mirrorPs5RouteHistory(stack) {
++  if (!stack.length || typeof window.history?.pushState !== "function") {
++    return false;
++  }
++  try {
++    stack.forEach((entry, index) => {
++      const state = {
++        route: entry.route,
++        params: entry.params || {},
++        previousRoute: index > 0 ? stack[index - 1].route : null
++      };
++      if (index === 0) {
++        window.history.replaceState(state, "");
++      } else {
++        window.history.pushState(state, "");
++      }
++    });
++    Router.historyInitialized = true;
++    return true;
++  } catch (_) {
++    return false;
++  }
++}
++
 +// The PS5 app reopens the page with ?ps5return=1 after its native player
 +// closes. Read once, then dropped from the URL so a later reload is a launch.
 +function consumePs5ReturnMarker() {
@@ -92,35 +127,122 @@ index a91a114..64aa574 100644
 +  }
 +}
 +
++// Back from the PS5 app's native player: into the same profile and screens,
++// signed in or as a guest. False on an ordinary launch.
++async function resumePs5NativeReturn() {
++  if (!Platform.isPS5()) {
++    return false;
++  }
++  const returningFromPlayer = consumePs5ReturnMarker();
++  let nativeReturn = await Ps5NativePlayer.takeReturn();
++  if (!nativeReturn && returningFromPlayer) {
++    await new Promise((resolve) => setTimeout(resolve, 600));
++    nativeReturn = await Ps5NativePlayer.takeReturn();
++  }
++  if (!nativeReturn && returningFromPlayer) {
++    // Back from the player without its saved screens: still the same
++    // viewer in the same profile, so never the profile picker.
++    await enterWithLastProfile();
++    return true;
++  }
++  if (nativeReturn) {
++    // The same viewing session: the profile chosen before playback.
++    const profileId = nativeReturn.context?.profileId;
++    const profiles = await ProfileManager.getProfiles();
++    if (profileId != null && profiles.some((profile) => String(profile.id) === String(profileId))) {
++      await ProfileManager.setActiveProfile(profileId);
++    }
++    await enterWithLastProfile({ ps5NativeReturn: nativeReturn });
++    return true;
++  }
++  return false;
++}
++
  async function routeAfterAuthentication() {
    loginTrace("authenticated route begin", { currentRoute: Router.getCurrent() || "" });
-+  if (Platform.isPS5()) {
-+    const returningFromPlayer = consumePs5ReturnMarker();
-+    let nativeReturn = await Ps5NativePlayer.takeReturn();
-+    if (!nativeReturn && returningFromPlayer) {
-+      await new Promise((resolve) => setTimeout(resolve, 600));
-+      nativeReturn = await Ps5NativePlayer.takeReturn();
-+    }
-+    if (!nativeReturn && returningFromPlayer) {
-+      // Back from the player without its saved screens: still the same
-+      // viewer in the same profile, so never the profile picker.
-+      await enterWithLastProfile();
-+      return;
-+    }
-+    if (nativeReturn) {
-+      // The same viewing session: the profile chosen before playback.
-+      const profileId = nativeReturn.context?.profileId;
-+      const profiles = await ProfileManager.getProfiles();
-+      if (profileId != null && profiles.some((profile) => String(profile.id) === String(profileId))) {
-+        await ProfileManager.setActiveProfile(profileId);
-+      }
-+      await enterWithLastProfile({ ps5NativeReturn: nativeReturn });
-+      return;
-+    }
++  if (await resumePs5NativeReturn()) {
++    return;
 +  }
    const profileRoute = await shouldShowProfileSelection();
    loginTrace("authenticated route profile decision", { show: profileRoute.show === true });
    if (profileRoute.show) {
+@@ -519,6 +612,26 @@ function setupPluginServiceLifecycle() {
+   });
+ }
+ 
++// A guest (signed out, QR skipped) entering the app.
++function enterAsGuest() {
++  // Honor "remember last profile" for guests too: skip the picker and go
++  // straight in with the last profile (guests have no PIN).
++  if (ProfileManager.isRememberLastProfileEnabled() && ProfileManager.hasEverSelectedProfile()) {
++    enterWithLastProfile({ restoreWebOsRoute: true }).catch((error) => {
++      console.warn("Failed to enter with last profile", error);
++      ProfileManager.clearActiveProfile();
++      if (Router.getCurrent() !== "profileSelection") {
++        Router.navigate("profileSelection", {}, { replaceHistory: true, skipStackPush: true });
++      }
++    });
++    return;
++  }
++  ProfileManager.clearActiveProfile();
++  if (Router.getCurrent() !== "profileSelection") {
++    Router.navigate("profileSelection", {}, { replaceHistory: true, skipStackPush: true });
++  }
++}
++
+ async function bootstrapApp() {
+   markBootStage("Rendering application shell");
+   renderAppShell();
+@@ -580,37 +693,19 @@ async function bootstrapApp() {
+       if (isSignedOutRouteAllowed()) {
+         return;
+       }
+-      if (shouldBypassQr) {
+-        // Honor "remember last profile" for guests too: skip the picker and go
+-        // straight in with the last profile (guests have no PIN).
+-        if (
+-          ProfileManager.isRememberLastProfileEnabled() &&
+-          ProfileManager.hasEverSelectedProfile()
+-        ) {
+-          enterWithLastProfile({ restoreWebOsRoute: true }).catch((error) => {
+-            console.warn("Failed to enter with last profile", error);
+-            ProfileManager.clearActiveProfile();
+-            if (Router.getCurrent() !== "profileSelection") {
+-              Router.navigate(
+-                "profileSelection",
+-                {},
+-                { replaceHistory: true, skipStackPush: true }
+-              );
+-            }
++      if (shouldBypassQr && Platform.isPS5()) {
++        // A guest coming back from the PS5 native player resumes like a
++        // signed-in viewer does; otherwise the usual guest entry below.
++        resumePs5NativeReturn()
++          .then((resumed) => resumed || enterAsGuest())
++          .catch((error) => {
++            console.warn("PS5 native return failed", error);
++            enterAsGuest();
+           });
+-          return;
+-        }
+-        ProfileManager.clearActiveProfile();
+-        if (Router.getCurrent() !== "profileSelection") {
+-          Router.navigate(
+-            "profileSelection",
+-            {},
+-            {
+-              replaceHistory: true,
+-              skipStackPush: true
+-            }
+-          );
+-        }
++        return;
++      }
++      if (shouldBypassQr) {
++        enterAsGuest();
+         return;
+       }
+       const hasSeenQr = LocalStore.get("hasSeenAuthQrOnFirstLaunch");
 diff --git a/js/core/player/pluginPolicy.js b/js/core/player/pluginPolicy.js
 index 9b8fe81..9c10eb1 100644
 --- a/js/core/player/pluginPolicy.js
@@ -195,6 +317,18 @@ index b8427a3..cdcac52 100644
    async fetchSubtitlesFromAddon(addon, type, idCandidates = [], videoId, options = {}) {
      const candidateIds = this.buildActualIdCandidates(type, idCandidates, videoId, {
        ...options,
+diff --git a/js/i18n/index.js b/js/i18n/index.js
+index b95acda..9316168 100644
+--- a/js/i18n/index.js
++++ b/js/i18n/index.js
+@@ -380,6 +380,7 @@ const KEY_ALIASES = {
+   "auth.qr.continueWithoutAccount": "auth_qr_continue_without_account",
+   "auth.qr.configureServer": "auth_qr_configure_server",
+   "auth.qr.expired": "qr_login_expired",
++  "auth.qr.expires": "auth_qr_expires",
+   "auth.qr.leftDescriptionSignedIn": "auth_qr_connected",
+   "auth.qr.leftDescriptionSignedOut": "auth_qr_phone_hint",
+   "auth.qr.manualInstruction": "auth_qr_manual_instruction",
 diff --git a/js/platform/index.js b/js/platform/index.js
 index ac5c1e2..57586e5 100644
 --- a/js/platform/index.js
@@ -312,10 +446,59 @@ index 465db26..cc8846a 100644
      }
      const target = this.getPointerFocusable(event);
 diff --git a/js/ui/screens/account/authQrSignInScreenMethods-02-bind-controls.js b/js/ui/screens/account/authQrSignInScreenMethods-02-bind-controls.js
-index 08f5f40..a24981c 100644
+index 08f5f40..31a9c3a 100644
 --- a/js/ui/screens/account/authQrSignInScreenMethods-02-bind-controls.js
 +++ b/js/ui/screens/account/authQrSignInScreenMethods-02-bind-controls.js
-@@ -166,8 +166,11 @@ export function createAuthQrSignInScreenMethods02() {
+@@ -96,8 +96,19 @@ export function createAuthQrSignInScreenMethods02() {
+         if (!this.isMounted || this.isLeaving) return;
+         if (!result || !result.code) {
+           this.setStatus(this.toFriendlyQrError(QrLoginService.getLastError()));
++          // PS5: a clock that is far off breaks every secure connection, and
++          // with it sign-in (the page itself measured the offset at boot).
++          if (Math.abs(Number(globalThis.__NUVIO_PS5_CLOCK_OFFSET_MS__ || 0)) > 12 * 3600 * 1000) {
++            this.setStatus(
++              "The PS5's date and time are wrong, so it cannot reach the sign-in service. " +
++                "Set them in Settings > System > Date and Time, then refresh."
++            );
++          }
++          this.showQrUnavailable();
++          this.scheduleQrRetry();
+           return;
+         }
++        this.qrRetryCount = 0;
+         this.renderQr(result);
+         this.setStatus(I18n.t("auth.qr.scanAndSignIn"));
+         this.startPolling(result.code, result.deviceNonce, result.pollIntervalSeconds || 3);
+@@ -138,6 +149,28 @@ export function createAuthQrSignInScreenMethods02() {
+       });
+       this.startCountdown(expiresAt);
+     },
++    // No code (the sign-in service could not be reached, or refused): say so in
++    // the QR frame rather than leave it blank, and try again on a backoff.
++    showQrUnavailable() {
++      const qrContainer = this.container?.querySelector("#qr-container");
++      if (qrContainer) {
++        qrContainer.innerHTML = `<span class="qr-code-unavailable">${escapeHtml(I18n.t("auth.qr.unavailable"))}</span>`;
++      }
++    },
++    scheduleQrRetry() {
++      if (this.qrRetryTimer) {
++        clearTimeout(this.qrRetryTimer);
++      }
++      const attempt = Number(this.qrRetryCount || 0);
++      this.qrRetryCount = attempt + 1;
++      const delayMs = Math.min(30000, 4000 * 2 ** Math.min(attempt, 3));
++      this.qrRetryTimer = setTimeout(() => {
++        this.qrRetryTimer = null;
++        if (this.isMounted && !this.isLeaving && this.useQrLogin && !this.isSignedIn) {
++          void this.startQr();
++        }
++      }, delayMs);
++    },
+     clearQr() {
+       const qrContainer = this.container?.querySelector("#qr-container");
+       const manualText = this.container?.querySelector("#qr-manual-text");
+@@ -166,8 +199,11 @@ export function createAuthQrSignInScreenMethods02() {
            });
          }
          if (remaining <= 0) {
@@ -328,6 +511,21 @@ index 08f5f40..a24981c 100644
          }
        };
        renderRemaining();
+diff --git a/js/ui/screens/account/authQrSignInScreenMethods-03-to-friendly-email-error.js b/js/ui/screens/account/authQrSignInScreenMethods-03-to-friendly-email-error.js
+index 08dfd02..85089f4 100644
+--- a/js/ui/screens/account/authQrSignInScreenMethods-03-to-friendly-email-error.js
++++ b/js/ui/screens/account/authQrSignInScreenMethods-03-to-friendly-email-error.js
+@@ -238,6 +238,10 @@ export function createAuthQrSignInScreenMethods03() {
+         clearTimeout(this.pollTimer);
+         this.pollTimer = null;
+       }
++      if (this.qrRetryTimer) {
++        clearTimeout(this.qrRetryTimer);
++        this.qrRetryTimer = null;
++      }
+     },
+     stopIntervals() {
+       this.stopPollingOnly();
 diff --git a/js/ui/screens/player/playerScreenMethods-01-mount.js b/js/ui/screens/player/playerScreenMethods-01-mount.js
 index 8b5b37e..a81bfa2 100644
 --- a/js/ui/screens/player/playerScreenMethods-01-mount.js
@@ -355,7 +553,7 @@ index 8b5b37e..a81bfa2 100644
        this.playerMountToken = mountToken;
        this.playerRouteActive = true;
 diff --git a/js/ui/screens/player/playerScreenMethods-18-start-player-controller-playback.js b/js/ui/screens/player/playerScreenMethods-18-start-player-controller-playback.js
-index 6ab3853..80cea2e 100644
+index 6ab3853..12948af 100644
 --- a/js/ui/screens/player/playerScreenMethods-18-start-player-controller-playback.js
 +++ b/js/ui/screens/player/playerScreenMethods-18-start-player-controller-playback.js
 @@ -1,9 +1,19 @@
@@ -427,7 +625,7 @@ index 6ab3853..80cea2e 100644
        PlayerController.setStartupPresentationAudioMuted?.(true);
        return Promise.resolve(PlayerController.play(playbackUrl, playbackContext)).catch((error) => {
          if (!this.isActiveMountToken(mountToken) || this.isExternalFrameMode()) {
-@@ -91,6 +136,331 @@ export function createPlayerScreenMethods18() {
+@@ -91,6 +136,328 @@ export function createPlayerScreenMethods18() {
          });
        });
      },
@@ -740,19 +938,16 @@ index 6ab3853..80cea2e 100644
 +        });
 +        return undefined;
 +      }
-+      // The browser history from before the reload is gone, so the router must
-+      // rebuild the previous screen rather than traverse history to it.
-+      const historyInitialized = Router.historyInitialized;
-+      Router.historyInitialized = false;
-+      let outcome;
-+      try {
-+        outcome = this.navigateBackToStreamScreen();
-+      } finally {
-+        Router.historyInitialized = historyInitialized;
-+      }
-+      const stack = Array.isArray(Router.stack) ? Router.stack : [];
-+      if (stack.length && stack[stack.length - 1]?.route === Router.current) {
-+        stack.pop();   /* that screen is now the current one, not one Back away */
++      // The page rebuilt the browser history of the screens before playback
++      // (see app.js), so this returns to Sources just as an in-page Back does.
++      const outcome = this.navigateBackToStreamScreen();
++      if (outcome !== "history") {
++        // Rebuilt in place instead: that screen is now the current one, not
++        // one Back away.
++        const stack = Array.isArray(Router.stack) ? Router.stack : [];
++        if (stack.length && stack[stack.length - 1]?.route === Router.current) {
++          stack.pop();
++        }
 +      }
 +      return outcome;
 +    },
@@ -796,6 +991,99 @@ index 8242b53..b0c4585 100644
        input.addEventListener("focus", () => {
          const current = this.container?.querySelector(".focusable.focused") || null;
          if (current !== input) {
+diff --git a/js/ui/screens/stream/streamScreenHelpers-02-flatten-streams.js b/js/ui/screens/stream/streamScreenHelpers-02-flatten-streams.js
+index d54775b..7d033a4 100644
+--- a/js/ui/screens/stream/streamScreenHelpers-02-flatten-streams.js
++++ b/js/ui/screens/stream/streamScreenHelpers-02-flatten-streams.js
+@@ -160,6 +160,30 @@ export function flattenStreams(streamResult) {
+   return flattened;
+ }
+ 
++// Torrent links (infoHash only) an addon returned that nothing here can play:
++// flattenStreams() drops them (no torrent engine or debrid resolver). Counted
++// so the PS5 can explain an otherwise empty list.
++export function countUnlistedTorrentStreams(streamResult) {
++  if (!streamResult || streamResult.status !== "success") {
++    return 0;
++  }
++  let count = 0;
++  (streamResult.data || []).forEach((group) => {
++    (group.streams || []).forEach((stream) => {
++      const entry = { ...stream, raw: stream };
++      if (
++        stream?.infoHash &&
++        !DirectDebridResolver.shouldListStream(entry) &&
++        !WebOsEngineFsResolver.canResolveStream(entry) &&
++        !TizenStreamingServerResolver.canResolveStream(entry)
++      ) {
++        count += 1;
++      }
++    });
++  });
++  return count;
++}
++
+ export function mergeStreamItems(existing = [], incoming = []) {
+   const order = [];
+   const byKey = new Map();
+diff --git a/js/ui/screens/stream/streamScreenMethods-04-load-streams.js b/js/ui/screens/stream/streamScreenMethods-04-load-streams.js
+index f973832..de02c68 100644
+--- a/js/ui/screens/stream/streamScreenMethods-04-load-streams.js
++++ b/js/ui/screens/stream/streamScreenMethods-04-load-streams.js
+@@ -17,6 +17,7 @@ export function createStreamScreenMethods04() {
+     normalizeType,
+     streamMergeKey,
+     flattenStreams,
++    countUnlistedTorrentStreams,
+     mergeStreamItems,
+     ensureAddonLogoImageProxyReady,
+     preloadMatchedStreamBadgeImages,
+@@ -232,6 +233,7 @@ export function createStreamScreenMethods04() {
+           return;
+         }
+         const loadedStreams = mergeStreamItems([], this.applyAddonLogos(flattenStreams(streamResult)));
++        this.unlistedTorrentCount = countUnlistedTorrentStreams(streamResult);
+         await Promise.allSettled(Array.from(pendingChunkTasks));
+         if (token !== this.loadToken) {
+           return;
+diff --git a/js/ui/screens/stream/streamScreenMethods-08-build-web-os-native-player-launch-parameters.js b/js/ui/screens/stream/streamScreenMethods-08-build-web-os-native-player-launch-parameters.js
+index 75a6667..3376762 100644
+--- a/js/ui/screens/stream/streamScreenMethods-08-build-web-os-native-player-launch-parameters.js
++++ b/js/ui/screens/stream/streamScreenMethods-08-build-web-os-native-player-launch-parameters.js
+@@ -281,7 +281,19 @@ export function createStreamScreenMethods08() {
+         `;
+     },
+     renderStableStreamEmptyState() {
+-      return `<div class="stream-route-empty" data-stream-empty hidden style="display:none">${escapeHtml(t("sources_no_streams", {}, "No streams found"))}</div>`;
++      return `<div class="stream-route-empty" data-stream-empty hidden style="display:none">${escapeHtml(this.getEmptyStreamsMessage())}</div>`;
++    },
++    // An empty list because every link was a torrent this device cannot play
++    // says so, rather than suggesting nothing was found.
++    getEmptyStreamsMessage() {
++      const torrents = Number(this.unlistedTorrentCount || 0);
++      if (torrents > 0) {
++        return (
++          `${torrents} torrent link${torrents === 1 ? " was" : "s were"} found, but torrents can't be streamed directly here. ` +
++          "Turn on a debrid service in the addon's settings (for example Torrentio with Real-Debrid or TorBox) and its links will play."
++        );
++      }
++      return t("sources_no_streams", {}, "No streams found");
+     }
+   };
+ }
+diff --git a/js/ui/screens/stream/streamScreenMethods-09-render.js b/js/ui/screens/stream/streamScreenMethods-09-render.js
+index 38d96d5..aa0d0ea 100644
+--- a/js/ui/screens/stream/streamScreenMethods-09-render.js
++++ b/js/ui/screens/stream/streamScreenMethods-09-render.js
+@@ -110,7 +110,7 @@ export function createStreamScreenMethods09() {
+       } else if (this.error) {
+         body = `<div class="stream-route-empty">${escapeHtml(this.error)}</div>`;
+       } else if (!filtered.length) {
+-        body = `<div class="stream-route-empty">${escapeHtml(t("sources_no_streams", {}, "No streams found"))}</div>`;
++        body = `<div class="stream-route-empty">${escapeHtml(this.getEmptyStreamsMessage())}</div>`;
+       }
+ 
+       const routeContent = this.autoResumeUiActive
 diff --git a/scripts/build.mjs b/scripts/build.mjs
 index be1471c..67b54e1 100644
 --- a/scripts/build.mjs
@@ -1071,10 +1359,10 @@ index 0000000..0fd9455
 +};
 diff --git a/js/platform/ps5/ps5Input.js b/js/platform/ps5/ps5Input.js
 new file mode 100644
-index 0000000..dcc2bc0
+index 0000000..716d0c4
 --- /dev/null
 +++ b/js/platform/ps5/ps5Input.js
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,195 @@
 +import { ps5Log } from "./ps5Service.js";
 +
 +// PS5 system browser input, as measured on FW 13.60:
@@ -1084,20 +1372,40 @@ index 0000000..dcc2bc0
 +//  - The system keyboard sends every character as keyCode 229 ("Process").
 +//  - There is no Gamepad or Fullscreen API.
 +// Nuvio runs in pointer-remote mode (hover focuses, click activates). This
-+// module keeps the cursor and the D-pad from fighting over focus.
++// module keeps the cursor and the D-pad from fighting over focus: a D-pad
++// press switches to D-pad mode, where the cursor is ignored (no hover focus)
++// and Cross acts on the item the D-pad selected, wherever the cursor rests.
++// Moving the cursor a real distance hands control back to it (issue #2).
 +
 +const ARROW_CODES = new Set([37, 38, 39, 40, 156]);
 +// A real cursor move shifts the pointer; WebKit also fires mousemove when the
 +// page scrolls under a still cursor, which must not steal D-pad focus.
 +const MIN_POINTER_TRAVEL_PX = 3;
++// In D-pad mode the cursor must travel this far from where it rested before
++// it takes over again, so a drifting stick or a nudge does not.
++const POINTER_WAKE_PX = 40;
++const DPAD_MODE_CLASS = "ps5-dpad-mode";
++const HOVER_EVENTS = [
++  "mouseover",
++  "mouseout",
++  "mouseenter",
++  "mouseleave",
++  "pointerover",
++  "pointerout",
++  "pointerenter",
++  "pointerleave"
++];
++const PRESS_EVENTS = ["mousedown", "mouseup", "pointerdown", "pointerup"];
 +const MAX_LOGGED_KEYS = 60;
 +
 +const state = {
 +  initialized: false,
-+  lastArrowAt: 0,
-+  lastPointerMoveAt: 0,
++  dpadMode: false,
++  anchorX: null,
++  anchorY: null,
 +  lastPointerX: null,
 +  lastPointerY: null,
++  redirectClick: false,
 +  loggedKeys: 0
 +};
 +
@@ -1114,6 +1422,28 @@ index 0000000..dcc2bc0
 +  return document.querySelector(".focusable.focused") || null;
 +}
 +
++function pointerPosition(event) {
++  return {
++    x: Number(event.screenX ?? event.clientX),
++    y: Number(event.screenY ?? event.clientY)
++  };
++}
++
++function setDpadMode(enabled) {
++  state.dpadMode = enabled;
++  state.redirectClick = false;
++  if (enabled) {
++    state.anchorX = state.lastPointerX;
++    state.anchorY = state.lastPointerY;
++  }
++  document.documentElement?.classList?.toggle(DPAD_MODE_CLASS, enabled);
++}
++
++function swallow(event) {
++  event.preventDefault();
++  event.stopImmediatePropagation();
++}
++
 +function dispatchEnter(target) {
 +  ["keydown", "keyup"].forEach((type) => {
 +    const event = new KeyboardEvent(type, {
@@ -1128,6 +1458,14 @@ index 0000000..dcc2bc0
 +  });
 +}
 +
++// True when Cross, pressed in D-pad mode on `target`, should activate the
++// D-pad selection instead of what lies under the cursor.
++function shouldRedirect(target) {
++  if (!state.dpadMode || isEditable(target)) return false;
++  const focused = focusedNode();
++  return Boolean(focused && !focused.contains(target));
++}
++
 +function onKey(event) {
 +  if (!event.isTrusted) return;
 +  const keyCode = Number(event.keyCode || event.which || 0);
@@ -1140,7 +1478,7 @@ index 0000000..dcc2bc0
 +
 +  if (event.type !== "keydown") return;
 +  if (ARROW_CODES.has(keyCode) || String(event.key || "").startsWith("Arrow")) {
-+    state.lastArrowAt = Date.now();
++    setDpadMode(true);
 +  }
 +  if (state.loggedKeys < MAX_LOGGED_KEYS) {
 +    state.loggedKeys += 1;
@@ -1150,32 +1488,59 @@ index 0000000..dcc2bc0
 +
 +function onPointerMove(event) {
 +  if (!event.isTrusted) return;
-+  const x = Number(event.screenX ?? event.clientX);
-+  const y = Number(event.screenY ?? event.clientY);
++  const { x, y } = pointerPosition(event);
 +  const moved =
 +    state.lastPointerX === null ||
 +    Math.abs(x - state.lastPointerX) >= MIN_POINTER_TRAVEL_PX ||
 +    Math.abs(y - state.lastPointerY) >= MIN_POINTER_TRAVEL_PX;
++  if (moved) {
++    state.lastPointerX = x;
++    state.lastPointerY = y;
++  }
++  if (state.dpadMode) {
++    if (state.anchorX === null) {
++      state.anchorX = x;
++      state.anchorY = y;
++    }
++    if (Math.hypot(x - state.anchorX, y - state.anchorY) < POINTER_WAKE_PX) {
++      event.stopImmediatePropagation();
++      return;
++    }
++    setDpadMode(false);
++    return;
++  }
 +  if (!moved) {
 +    // Scroll-induced synthetic move: hide it from the focus engine.
 +    event.stopImmediatePropagation();
-+    return;
 +  }
-+  state.lastPointerX = x;
-+  state.lastPointerY = y;
-+  state.lastPointerMoveAt = Date.now();
++}
++
++function onHover(event) {
++  if (event.isTrusted && state.dpadMode) {
++    event.stopImmediatePropagation();
++  }
++}
++
++function onPress(event) {
++  if (!event.isTrusted) return;
++  if (!state.dpadMode) return;
++  if (event.type === "mousedown" || event.type === "pointerdown") {
++    state.redirectClick = shouldRedirect(event.target);
++    if (!state.redirectClick && isEditable(event.target)) {
++      setDpadMode(false);
++    }
++  }
++  // The press must not move focus to the item under the cursor.
++  if (state.redirectClick) swallow(event);
 +}
 +
 +function onClick(event) {
-+  if (!event.isTrusted || isEditable(event.target)) return;
-+  // After D-pad navigation the cursor may sit over some other item; Cross
-+  // should act on the item the user moved focus to, like a TV remote's OK.
-+  if (state.lastArrowAt <= state.lastPointerMoveAt) return;
-+  const focused = focusedNode();
-+  if (!focused || focused.contains(event.target)) return;
-+  event.preventDefault();
-+  event.stopImmediatePropagation();
-+  dispatchEnter(focused);
++  if (!event.isTrusted) return;
++  const redirect = state.redirectClick || shouldRedirect(event.target);
++  state.redirectClick = false;
++  if (!redirect) return;
++  swallow(event);
++  dispatchEnter(focusedNode());
 +}
 +
 +export const Ps5Input = {
@@ -1188,6 +1553,8 @@ index 0000000..dcc2bc0
 +    document.addEventListener("keypress", onKey, true);
 +    document.addEventListener("mousemove", onPointerMove, true);
 +    document.addEventListener("pointermove", onPointerMove, true);
++    HOVER_EVENTS.forEach((type) => document.addEventListener(type, onHover, true));
++    PRESS_EVENTS.forEach((type) => document.addEventListener(type, onPress, true));
 +    document.addEventListener("click", onClick, true);
 +  }
 +};
@@ -1466,10 +1833,10 @@ index 0000000..79dc703
 +}
 diff --git a/ps5-boot.js b/ps5-boot.js
 new file mode 100644
-index 0000000..b42a82d
+index 0000000..2348024
 --- /dev/null
 +++ b/ps5-boot.js
-@@ -0,0 +1,286 @@
+@@ -0,0 +1,295 @@
 +/*
 + * PS5 boot reporter. Loads before everything else and only activates in the
 + * PS5 browser: it streams boot stages, errors, console warnings and a periodic
@@ -1617,6 +1984,7 @@ index 0000000..b42a82d
 +      if (!info || info.known !== true) return false;
 +      var offset = Number(info.offsetMs);
 +      if (!isFinite(offset)) return true;
++      window.__NUVIO_PS5_CLOCK_OFFSET_MS__ = offset;
 +      if (Math.abs(offset) >= 30000 && !applied) {
 +        applied = true;
 +        Date.now = function nowCorrected() {
@@ -1688,9 +2056,17 @@ index 0000000..b42a82d
 +      for (var i = 0; i < arguments.length; i += 1) {
 +        var value = arguments[i];
 +        try {
++          // Errors (and DOMExceptions such as AbortError, which have no
++          // stack and stringify to {}) are logged by name and message.
++          var described =
++            value && typeof value === "object" && (value.message || value.name)
++              ? String(value.name || "Error") + ": " + String(value.message || "") +
++                (value.status ? " (HTTP " + value.status + ")" : "") +
++                (value.stack ? " " + String(value.stack).split("\n")[0] : "")
++              : null;
 +          parts.push(
-+            value && value.stack
-+              ? String(value.stack)
++            described !== null
++              ? described
 +              : typeof value === "object"
 +                ? JSON.stringify(value)
 +                : String(value)

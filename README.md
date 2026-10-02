@@ -9,10 +9,10 @@ Browse, search, pick a source and press play exactly as in Nuvio. The stream
 then opens in a native player that looks like Nuvio's - same controls, same
 panels, same typography - but decodes on the PS5 itself: 4K HDR10, Dolby
 Vision (HDR10 base layer), HEVC and H.264 in hardware, lossless TrueHD and
-DTS-HD audio, every subtitle format, and a deep read-ahead buffer so internet
-streams play without stalls. When the film ends, or you press back, you are
-returned to exactly where you were in Nuvio: progress saved, Trakt scrobbled,
-next episode ready.
+DTS-HD audio in 7.1, every subtitle format, and a deep read-ahead buffer so
+internet streams play without stalls. When the film ends, or you press back,
+you are returned to exactly where you were in Nuvio: progress saved, Trakt
+scrobbled, next episode ready.
 
 > Unofficial. This project is not affiliated with, endorsed by or supported by
 > the Nuvio team. Nuvio's own interface and services are used as they are
@@ -25,11 +25,13 @@ next episode ready.
 **Playback**
 - Hardware HEVC (8 and 10-bit) and H.264 decoding up to 3840x2160, measured
   at ~1 ms per 4K frame
-- HDR10 output with automatic switching of the console's display mode;
-  Dolby Vision profile 8 plays its HDR10 base layer (profile 5 is flagged)
+- HDR10 output with automatic switching of the console's display mode
+- Dolby Vision profile 8 plays its HDR10 base layer; profile 5 (no HDR10
+  layer) is flagged on screen
 - UHD Blu-ray remuxes encoded in tiles, and AV1, decode in software on all
   CPU cores - 4K tiled HEVC at real time with no late frames
-- Lossless audio: TrueHD / Atmos, DTS-HD MA, E-AC-3, AC-3, AAC, FLAC, PCM;
+- Lossless audio: TrueHD / Atmos, DTS-HD MA, E-AC-3, AC-3, AAC, FLAC, PCM,
+  output as 32-bit float 7.1 so 24-bit tracks keep their full resolution;
   the best track for your language is chosen automatically (never commentary)
 - 30 seconds of read-ahead for internet streams, kept in one preallocated
   block of memory; a clean pause-and-refill when the network falls behind
@@ -120,6 +122,30 @@ time Nuvio is closed.
 
 ---
 
+## Troubleshooting
+
+- **"No streams found", or an addon shown in red.** If the addon only
+  returns torrents (Torrentio without a debrid service, for example), Nuvio
+  PS5 says how many torrent links it found: the PS5 cannot stream torrents
+  directly. Add a debrid service (Real-Debrid, AllDebrid, TorBox, ...) in the
+  addon's own configuration and its links play. If an addon shows red
+  everywhere, your internet provider may block its site: set the PS5's DNS
+  to 1.1.1.1 and 1.0.0.1 (Settings > Network > Settings > Set Up Internet
+  Connection, your network, Advanced Settings, DNS Settings: Manual).
+- **The sign-in QR code does not appear.** The frame says when no code could
+  be fetched, and Nuvio keeps retrying on its own. A PS5 whose date and time
+  are badly wrong cannot make secure connections: set them under Settings >
+  System > Date and Time. It can also mean Nuvio's sign-in service is down
+  for a while.
+- **Controller.** Move with the D-pad, or with the left stick as a cursor.
+  After a D-pad press, Cross always acts on the highlighted item, wherever
+  the cursor rests; moving the stick switches back to the cursor. Circle goes
+  back, also from the player to Nuvio.
+- **A stream fails or the app closes.** Please open an issue with your
+  firmware, the addon, and the file name or format (MKV/MP4, codec, HDR).
+
+---
+
 ## Support
 
 Nuvio PS5 is an unofficial port: it isn't made or funded by the Nuvio team,
@@ -166,8 +192,15 @@ The result is `service/nuvio-ps5.elf`.
 
 ## Known limitations
 
-- Dolby Vision is shown through its HDR10 base layer; profile 5 (no HDR10
-  base) has wrong colours and is flagged on screen.
+- The PS5 cannot output Dolby Vision, so it is shown through its HDR10 base
+  layer. Profile 5 has no such layer: it plays with wrong colours and is
+  flagged on screen, so pick an HDR10 version of those. Profile 7
+  enhancement layers are not used.
+- Torrents are not streamed directly: an addon's torrent links play through
+  a debrid service (see Troubleshooting).
+- Dolby Atmos and DTS:X play their 7.1 bed: the PS5 gives apps no way to pass
+  the original bitstream to a receiver, so height and object information is
+  not available.
 - Tiled 4K HEVC and 4K AV1 decode on the CPU: smooth at 24 fps, but seeking
   in them takes about two seconds.
 - The PS5 web browser alone (without the app) falls back to its own player.

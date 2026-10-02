@@ -46,7 +46,9 @@ enum {
     EVO_AGC_PIPE_NV12_HDR_PQ = 69,    /* PQ  -> HDR10 */
     EVO_AGC_PIPE_NV12_HLG_PQ = 70,    /* HLG -> HDR10 */
     EVO_AGC_PIPE_VIDEO_P010_SDR = 71, /* 10-bit P010 SDR (BT.709) */
-    EVO_AGC_PIPE_COUNT = 72,
+    EVO_AGC_PIPE_VIDEO_DV5 = 72,      /* Dolby Vision profile 5 -> SDR */
+    EVO_AGC_PIPE_VIDEO_DV5_PQ = 73,   /* Dolby Vision profile 5 -> HDR10 */
+    EVO_AGC_PIPE_COUNT = 74,
 
     EVO_AGC_UP_S_CONVS = 4,
     EVO_AGC_UP_M_CONVS = 7,
@@ -330,6 +332,10 @@ int  evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
                       int disp_w, int disp_h,
                       int view_mode, int ten_bit, int color_trc,
                       int is_direct, int64_t pts_us);
+
+/* 1 if that pipeline compiled and can be bound. */
+int evo_agc_runtime_pipeline_valid(int pipeline_id);
+
 
 #ifdef __cplusplus
 }

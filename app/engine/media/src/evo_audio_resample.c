@@ -169,7 +169,7 @@ int prospero_audio_resampler_configure(
         swr_alloc_set_opts2(
             &prospero_audio_swr,
             &output_layout,
-            AV_SAMPLE_FMT_S16,
+            AV_SAMPLE_FMT_FLT,   /* evo_pcm_t, see evo_audio_out.h */
             prospero_audio_output_rate,
             &input_layout,
             (enum AVSampleFormat)frame->format,

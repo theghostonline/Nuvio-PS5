@@ -196,6 +196,7 @@ int         evo_vdec_ffmpeg_pix_fmt(const evo_vdec *v);     /* AVPixelFormat */
 const char *evo_vdec_ffmpeg_codec_name(const evo_vdec *v);
 void       *evo_vdec_ffmpeg_avframe(evo_vdec *v);           /* AVFrame* for the r==2 path */
 
+
 #ifdef __cplusplus
 }
 #endif

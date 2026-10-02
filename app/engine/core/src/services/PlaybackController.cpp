@@ -11,6 +11,7 @@ extern "C" {
 #include "evo_audio_out.h"
 #include "evo_audio_resample.h"
 #include "evo_packet_queue.h"
+#include "evo_thread.h"
 #include "evo_vdec.h"
 #include "evo_sweep.h"
 #include "evo_direct_mem.h"   /* evo_mem_budget_log - the numbers behind the 1080p rule */
@@ -64,6 +65,11 @@ extern "C" void evo_log_alloc_state(const char *when)
 #include "evo_subtitle.h"
 #ifdef NUVIO_APP
 #include "nuvio_subs.h"
+#include "dv_rpu.h"
+#include "evo_agc_runtime.h"
+extern "C" {
+#include <libavutil/dovi_meta.h>
+}
 extern "C" int nuvio_pick_audio_stream(struct AVFormatContext *fmt, int current);
 #endif
 #include "evo_stream_io.h"
@@ -90,6 +96,9 @@ extern "C" {
 
 int sceAudioOutInit(void);
 int sceAudioOutOpen(int userId, int type, int index, unsigned int len, unsigned int freq, unsigned int param);
+#ifdef NUVIO_APP
+extern "C" char nuvio_vdec_conf[512];   /* test switches, see evo_vdec_native.c */
+#endif
 int sceAudioOutClose(int handle);
 }
 
@@ -339,6 +348,9 @@ void PlaybackController::stopPlayback() {
     resetScrubHold();
 
     prospero_subtitle_clear();
+#ifdef NUVIO_APP
+    dv_session_end();
+#endif
 
     if (demux_thread_running) {
         /* A network read can block for rw_timeout and then sit in FFmpeg's
@@ -910,6 +922,24 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
         vp.width = vStream->codecpar->width;
         vp.height = vStream->codecpar->height;
         vp.avctx_params = vStream->codecpar;
+#ifdef NUVIO_APP
+        /* Dolby Vision profile 5: collect each frame's RPU from here on so the
+         * renderer can rebuild the picture (src/dv_rpu.c). */
+        {
+            const AVPacketSideData *dsd = av_packet_side_data_get(
+                vStream->codecpar->coded_side_data, vStream->codecpar->nb_coded_side_data,
+                AV_PKT_DATA_DOVI_CONF);
+            const AVDOVIDecoderConfigurationRecord *dcfg =
+                dsd ? (const AVDOVIDecoderConfigurationRecord *)dsd->data : nullptr;
+            /* Only when this build carries the profile 5 pipelines: without
+             * them nothing would use the parsed RPUs. */
+            if (dcfg && dcfg->dv_profile == 5 &&
+                evo_agc_runtime_pipeline_valid(EVO_AGC_PIPE_VIDEO_DV5))
+                dv_session_begin();
+            else
+                dv_session_end();
+        }
+#endif
         /*
          * Software decode above 1080p - allowed by default since #95.
          *
@@ -1080,10 +1110,26 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                     int chCount = audio_ctx->ch_layout.nb_channels;
                     int handle = -1;
 
+                    /* 32-bit float ports first (FLOAT_8CH 5, FLOAT_STEREO 4), so
+                     * 24-bit lossless audio keeps its resolution; 16-bit ports
+                     * (S16_8CH 2, S16_STEREO 1) only if those are refused. The
+                     * test switch "audio_s16=1" (vdec.conf) opens 16-bit ports
+                     * only, to check what reaches HDMI bit for bit. */
+                    bool s16_only = false;
+#ifdef NUVIO_APP
+                    s16_only = std::strstr(nuvio_vdec_conf, "audio_s16=1") != nullptr;
+#endif
+                    evo_audio_port_float = 1;
                     if (chCount > 2) {
-                        handle = sceAudioOutOpen(0xFF, 0, 0,
-                                                 AUDIO_BLOCK_SAMPLES, 48000,
-                                                 2 /* S16_8CH */);
+                        handle = s16_only ? -1
+                                          : sceAudioOutOpen(0xFF, 0, 0, AUDIO_BLOCK_SAMPLES, 48000,
+                                                            5 /* FLOAT_8CH */);
+                        if (handle < 1) {
+                            handle = sceAudioOutOpen(0xFF, 0, 0, AUDIO_BLOCK_SAMPLES, 48000,
+                                                     2 /* S16_8CH */);
+                            if (handle >= 1)
+                                evo_audio_port_float = 0;
+                        }
                         if (handle >= 1) {
                             evo_audio_channels = 8;
                         } else {
@@ -1095,10 +1141,18 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                     /* Surround refused (or a genuinely stereo source): stereo. */
                     if (handle < 1) {
                         evo_audio_channels = 2;
-                        handle = sceAudioOutOpen(0xFF, 0, 0,
-                                                 AUDIO_BLOCK_SAMPLES, 48000,
-                                                 1 /* S16_STEREO */);
+                        evo_audio_port_float = 1;
+                        handle = s16_only ? -1
+                                          : sceAudioOutOpen(0xFF, 0, 0, AUDIO_BLOCK_SAMPLES, 48000,
+                                                            4 /* FLOAT_STEREO */);
+                        if (handle < 1) {
+                            handle = sceAudioOutOpen(0xFF, 0, 0, AUDIO_BLOCK_SAMPLES, 48000,
+                                                     1 /* S16_STEREO */);
+                            evo_audio_port_float = 0;
+                        }
                     }
+                    evo_bt("PlaybackController: audio port %dch %s (handle %d)", evo_audio_channels,
+                           evo_audio_port_float ? "float32" : "s16", handle);
 
                     audio_handle = handle;
 
@@ -1306,16 +1360,16 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     evo_boot_log("  pb: threads demux=1 video=%d adec=%d aout=%d",
                  video_thread_running, audio_decode_thread_running,
                  audio_thread_running);
-    pthread_create(&demux_thread, nullptr, demux_thread_func, nullptr);
+    evo_thread_create(&demux_thread, demux_thread_func, nullptr);
 
     if (video_thread_running) {
-        pthread_create(&video_thread, nullptr, video_decode_thread_func, nullptr);
+        evo_thread_create(&video_thread, video_decode_thread_func, nullptr);
     }
     if (audio_decode_thread_running) {
-        pthread_create(&audio_decode_thread, nullptr, audio_decode_thread_func, nullptr);
+        evo_thread_create(&audio_decode_thread, audio_decode_thread_func, nullptr);
     }
     if (audio_thread_running) {
-        pthread_create(&audio_thread, nullptr, audio_output_thread, nullptr);
+        evo_thread_create(&audio_thread, audio_output_thread, nullptr);
     }
 
     m_playbackFsm.postEvent(PlaybackEvent::Play);

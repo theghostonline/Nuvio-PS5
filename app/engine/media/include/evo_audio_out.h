@@ -33,6 +33,16 @@ extern "C" {
 #define AUDIO_BLOCK_SAMPLES 2048
 
 /*
+ * Samples travel as 32-bit float from the resampler to the audio port: a
+ * 24-bit lossless track (TrueHD, DTS-HD MA, FLAC) keeps its full resolution
+ * instead of being cut to 16 bits. If the console refuses a float port, the
+ * output thread converts each block to 16-bit for an S16 port instead
+ * (evo_audio_port_float = 0).
+ */
+typedef float evo_pcm_t;
+extern int evo_audio_port_float;
+
+/*
  * Cold-start window after an open or a seek, in seconds of media.
  *
  * Video waits on the audio clock (decode_next_video_frame) and audio waits on

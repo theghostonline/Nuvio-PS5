@@ -35,6 +35,7 @@
 #include "evo_boot_log.h"
 #include "evo_boot_trace.h"
 #include "evo_playback.h"
+#include "evo_thread.h"
 #include "evo_vdec.h"
 #include "pp_playback.h"
 
@@ -277,7 +278,7 @@ bool start_job(OpenJob &j)
     j.done = false;
     j.ok = false;
     j.running = true;
-    if (pthread_create(&j.thread, nullptr, open_thread, &j) != 0) {
+    if (evo_thread_create(&j.thread, open_thread, &j) != 0) {
         j.running = false;
         return false;
     }
@@ -439,11 +440,14 @@ std::string quality_line()
         else if (h >= 700) q = "720p";
         else if (h > 0) q = std::to_string(h) + "p";
         /* The PS5 cannot output Dolby Vision: profile 8 shows its HDR10/HLG
-         * base layer, and that is what the label says. */
+         * base layer, and profile 5 is rebuilt into HDR10 (src/dv_rpu.c) when
+         * this build has that pipeline - which is what the label says. */
         const int dv = dolby_vision_profile(p);
         const char *hdr = p->color_trc == AVCOL_TRC_SMPTE2084 ? (dv ? "HDR10 (Dolby Vision)" : "HDR10")
                           : p->color_trc == AVCOL_TRC_ARIB_STD_B67 ? (dv ? "HLG (Dolby Vision)" : "HLG")
-                          : dv == 5 ? "Dolby Vision 5" : nullptr;
+                          : dv == 5 ? (evo_agc_runtime_pipeline_valid(EVO_AGC_PIPE_VIDEO_DV5)
+                                           ? "HDR10 (Dolby Vision)" : "Dolby Vision 5")
+                          : nullptr;
         if (hdr)
             q += std::string(q.empty() ? "" : dot) + hdr;
         q += std::string(q.empty() ? "" : dot) + video_codec_name(p->codec_id);
@@ -689,6 +693,7 @@ static void reopen_software(Session &s, const char *why)
     start_job(s.job);
 }
 
+
 extern "C" void nuvio_player_run(const char *json)
 {
     static Session s_storage;
@@ -772,8 +777,11 @@ extern "C" void nuvio_player_run(const char *json)
                     s.st.quality_line = quality_line();
                     seen_active = false;
                     evo_bt("nuvio: open ok - %s", s.st.quality_line.c_str());
+                    /* Profile 5 is rebuilt on the GPU; only a build without that
+                     * pipeline would still show it in the wrong colours. */
                     if (play_fmt && video_stream_index >= 0 &&
-                        dolby_vision_profile(play_fmt->streams[video_stream_index]->codecpar) == 5)
+                        dolby_vision_profile(play_fmt->streams[video_stream_index]->codecpar) == 5 &&
+                        !evo_agc_runtime_pipeline_valid(EVO_AGC_PIPE_VIDEO_DV5))
                         s_osd.toast(s.req.str("dv5_unsupported",
                                               "Dolby Vision profile 5 can't be shown on PS5 - colours may be off. Try another source."),
                                     now);
