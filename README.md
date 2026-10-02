@@ -104,14 +104,19 @@ hardware-verified fixes. A summary of the harder ones:
 
 ## Install
 
-Requirements: a PS5 able to run homebrew and load ELF payloads.
+Requirements: a jailbroken PS5 that can load ELF payloads. Tested on
+firmware 13.60 with the Relapse exploit, kstuff-lite, ShadowMount+ and
+etaHEN; any firmware with a working ELF loader should do.
 
 1. Download `nuvio-ps5.elf` from the latest release.
-2. Send it to your ELF loader. The service starts, installs the Nuvio tile
-   and shows "Nuvio ready".
+2. Send it to your ELF loader (port 9021) after your usual payloads. The
+   service starts, installs the Nuvio tile and shows "Nuvio ready".
 3. Open Nuvio from the home screen and sign in as usual.
 
-Sending a newer `nuvio-ps5.elf` updates the app the next time Nuvio is closed.
+Tip: add `nuvio-ps5.elf` to the end of your payload autoload list so it starts
+with the jailbreak - PS5 jailbreaks are tethered, so it needs loading again
+after every reboot. Sending a newer `nuvio-ps5.elf` updates the app the next
+time Nuvio is closed.
 
 ---
 
