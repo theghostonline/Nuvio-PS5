@@ -9,7 +9,7 @@
 #include <stdint.h>
 
 /* Service version; bump with every payload release. */
-#define NUVIO_PS5_VERSION "1.7.0"
+#define NUVIO_PS5_VERSION "1.7.1"
 
 /* Must match PS5_SERVICE_PORT in the web app (js/platform/ps5/ps5Service.js)
  * and the deeplink in assets/param.json. Never change it: the browser keys
@@ -31,6 +31,10 @@
 
 /* log.c */
 void nuvio_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+
+/* Console clock vs real time (clock.c). */
+void nuvio_clock_start(void);
+char *nuvio_clock_json(void);
 void nuvio_app_log_append(const char *line, size_t len);
 
 /* notify.c */

@@ -396,6 +396,9 @@ static enum MHD_Result handle_request(struct MHD_Connection *conn, const char *u
     return send_json(conn, 200, strdup("{\"returnValue\":true}"));
   }
 
+  if (!strcmp(url, "/api/time"))
+    return send_json(conn, 200, nuvio_clock_json());
+
   if (!strcmp(url, "/api/status"))
     return serve_status(conn);
 

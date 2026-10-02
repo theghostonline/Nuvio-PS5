@@ -36,7 +36,7 @@ LIBS    := -L$(HB)/lib -lmicrohttpd -lcurl -lpsl \
            -llzma -lzstd -lbz2 -lz -ljansson -lm -lpthread \
            -lSceSystemService -lSceUserService -lSceAppInstUtil
 
-SRCS := src/main.c src/http.c src/plugin_fetch.c src/tile.c src/www.c \
+SRCS := src/main.c src/clock.c src/http.c src/plugin_fetch.c src/tile.c src/www.c \
         src/fsutil.c src/log.c src/notify.c src/launch.c src/app_install.c src/player_api.c src/debug.c src/stream.c \
         src/hbldr/hbldr.c src/hbldr/elfldr.c src/hbldr/pt.c
 

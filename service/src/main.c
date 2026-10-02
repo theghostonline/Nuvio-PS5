@@ -92,6 +92,8 @@ int main(void) {
     return 1;
   }
 
+  nuvio_clock_start();
+
   if (nuvio_http_start(www_dir) != 0) {
     nuvio_notify("Nuvio: port %d is busy, service not started", NUVIO_PORT);
     return 2;
