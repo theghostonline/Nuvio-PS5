@@ -1,0 +1,13 @@
+# libSceVideodec2 — Route B (VCN hardware decode, one AU in / NV12 out).
+# Names from third_party/SharpProspero .../Interop/Video/Videodec2.cs +
+# projects/evoplayer/media/include/sce/sce_videodec2.h.
+sceVideodec2QueryComputeMemoryInfo
+sceVideodec2AllocateComputeQueue
+sceVideodec2ReleaseComputeQueue
+sceVideodec2QueryDecoderMemoryInfo
+sceVideodec2CreateDecoder
+sceVideodec2DeleteDecoder
+sceVideodec2MapDirectMemory   # keep: real 12.70 export, wired by #40 (direct-mem routing)
+sceVideodec2Reset
+sceVideodec2Decode
+sceVideodec2Flush

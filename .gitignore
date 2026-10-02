@@ -1,0 +1,10 @@
+build/
+build.log
+build-assets.mk
+*.elf
+.DS_Store
+.deps/
+web/NuvioTVSmart/
+node_modules/
+tools/preview/out/
+web/nuvio.env.js

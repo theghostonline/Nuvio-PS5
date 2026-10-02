@@ -1,0 +1,3 @@
+ic_player_*.svg: Nuvio TV's player icons (NuvioTVSmart/assets/icons), as Nuvio ships them.
+ic_ui_*.svg: Material Design icons by Google, Apache License 2.0
+(https://github.com/google/material-design-icons).

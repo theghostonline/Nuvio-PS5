@@ -1,0 +1,1811 @@
+diff --git a/css/layout.css b/css/layout.css
+index e69de29..5e197df 100644
+--- a/css/layout.css
++++ b/css/layout.css
+@@ -0,0 +1,8 @@
++
++/* PS5 app: the native player is taking over - nothing of the web player shows. */
++#player.player-ps5-native-handoff {
++  background: #000 !important;
++}
++#player.player-ps5-native-handoff > * {
++  visibility: hidden !important;
++}
+diff --git a/index.html b/index.html
+index cddc462..f4e4f4c 100644
+--- a/index.html
++++ b/index.html
+@@ -7,6 +7,7 @@
+       name="viewport"
+       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+     />
++    <script src="ps5-boot.js"></script>
+     <script src="assets/runtime/legacy-features.js"></script>
+     <script>
+       (function configureTizenLaunch() {
+diff --git a/js/app.js b/js/app.js
+index a91a114..64aa574 100644
+--- a/js/app.js
++++ b/js/app.js
+@@ -19,6 +19,7 @@ import { renderAddonRemotePage } from "./bootstrap/renderAddonRemotePage.js";
+ import { preloadStreamBadgeImages } from "./ui/screens/stream/streamScreen.js";
+ import { warmStreamingLibs } from "./runtime/loadStreamingLibs.js";
+ import { Platform } from "./platform/index.js";
++import { Ps5NativePlayer } from "./platform/ps5/ps5NativePlayer.js";
+ import { TizenCapabilities } from "./platform/tizen/tizenCapabilities.js";
+ import { PluginServiceClient } from "./platform/pluginServiceClient.js";
+ import { getTvRuntimePerformanceProfile } from "./platform/tvRuntimePerformance.js";
+@@ -94,6 +95,10 @@ async function checkForAppUpdateOnStartup() {
+     return;
+   }
+   updateCheckStarted = true;
++  if (Platform.isPS5()) {
++    // TV releases ship as Tizen/webOS packages; the PS5 build updates with its payload.
++    return;
++  }
+ 
+   try {
+     // Tizen can spend longer restoring the authenticated route because the
+@@ -236,7 +241,7 @@ async function shouldShowProfileSelection() {
+   return { show: profiles.length > 1 || activeProfileHasPin, pinStates };
+ }
+ 
+-async function enterWithLastProfile({ restoreWebOsRoute = false } = {}) {
++async function enterWithLastProfile({ restoreWebOsRoute = false, ps5NativeReturn = null } = {}) {
+   hasSelectedProfileThisSession = true;
+   const profiles = await ProfileManager.getProfiles();
+   const activeProfileId = ProfileManager.getActiveProfileId();
+@@ -271,6 +276,20 @@ async function enterWithLastProfile({ restoreWebOsRoute = false } = {}) {
+       : null;
+   const isHomeResumeRoute = resumeRoute?.route === "home";
+ 
++  if (ps5NativeReturn) {
++    // Back from the PS5 app's native player: the screens the viewer came
++    // through, then the player route itself, which saves the progress and
++    // carries on (back to Sources/Detail, next episode, or the error).
++    const savedStack = Array.isArray(ps5NativeReturn.context?.stack) ? ps5NativeReturn.context.stack : [];
++    Router.stack = savedStack.filter((entry) => entry && entry.route && Router.routes?.[entry.route]);
++    await Router.navigate(
++      "player",
++      { ...(ps5NativeReturn.context.playerParams || {}), ps5NativeReturn },
++      { replaceHistory: true, skipStackPush: true }
++    );
++    return;
++  }
++
+   if (experienceRoute !== "home") {
+     await Router.navigate(experienceRoute, {}, { replaceHistory: true, skipStackPush: true });
+   } else if (resumeRoute?.route && !isHomeResumeRoute) {
+@@ -286,8 +305,44 @@ async function enterWithLastProfile({ restoreWebOsRoute = false } = {}) {
+   }
+ }
+ 
++// The PS5 app reopens the page with ?ps5return=1 after its native player
++// closes. Read once, then dropped from the URL so a later reload is a launch.
++function consumePs5ReturnMarker() {
++  try {
++    if (new URLSearchParams(window.location.search).get("ps5return") !== "1") return false;
++    window.history.replaceState(window.history.state, "", window.location.pathname);
++    return true;
++  } catch (_) {
++    return false;
++  }
++}
++
+ async function routeAfterAuthentication() {
+   loginTrace("authenticated route begin", { currentRoute: Router.getCurrent() || "" });
++  if (Platform.isPS5()) {
++    const returningFromPlayer = consumePs5ReturnMarker();
++    let nativeReturn = await Ps5NativePlayer.takeReturn();
++    if (!nativeReturn && returningFromPlayer) {
++      await new Promise((resolve) => setTimeout(resolve, 600));
++      nativeReturn = await Ps5NativePlayer.takeReturn();
++    }
++    if (!nativeReturn && returningFromPlayer) {
++      // Back from the player without its saved screens: still the same
++      // viewer in the same profile, so never the profile picker.
++      await enterWithLastProfile();
++      return;
++    }
++    if (nativeReturn) {
++      // The same viewing session: the profile chosen before playback.
++      const profileId = nativeReturn.context?.profileId;
++      const profiles = await ProfileManager.getProfiles();
++      if (profileId != null && profiles.some((profile) => String(profile.id) === String(profileId))) {
++        await ProfileManager.setActiveProfile(profileId);
++      }
++      await enterWithLastProfile({ ps5NativeReturn: nativeReturn });
++      return;
++    }
++  }
+   const profileRoute = await shouldShowProfileSelection();
+   loginTrace("authenticated route profile decision", { show: profileRoute.show === true });
+   if (profileRoute.show) {
+diff --git a/js/core/player/pluginPolicy.js b/js/core/player/pluginPolicy.js
+index 9b8fe81..9c10eb1 100644
+--- a/js/core/player/pluginPolicy.js
++++ b/js/core/player/pluginPolicy.js
+@@ -102,6 +102,19 @@ export function getPluginCapabilitySnapshot() {
+     });
+   }
+ 
++  if (Platform.isPS5()) {
++    return {
++      ...snapshotFields(platform, PLUGIN_QUOTAS.modern, {
++        appSupported: true,
++        normalAddonsSupported: true,
++        candidate: true,
++        reason: "Waiting for the nuvio-ps5 payload and QuickJS worker handshake"
++      }),
++      precheckPassed: true,
++      pluginServicePackaged: true
++    };
++  }
++
+   if (platform === "tizen") {
+     const capabilities = TizenCapabilities.get();
+     const tizenVersion = parseVersion(capabilities.tizenVersion);
+diff --git a/js/data/repository/subtitleRepository.js b/js/data/repository/subtitleRepository.js
+index b8427a3..cdcac52 100644
+--- a/js/data/repository/subtitleRepository.js
++++ b/js/data/repository/subtitleRepository.js
+@@ -135,6 +135,45 @@ class SubtitleRepository {
+     return mergedResults;
+   }
+ 
++  // The URLs getSubtitles() would ask, without asking them: the PS5 app's
++  // native player fetches these itself while the stream opens, so the page can
++  // hand playback over at once. Uses the cached addon list and never waits more
++  // than two seconds for a canonical id.
++  async buildSubtitleRequests(type, id, videoId = null, options = {}) {
++    const normalizedType = this.canonicalSubtitleType(type);
++    const rawId = String(id || "").trim();
++    const normalizedId = this.normalizeIdForLookup(rawId);
++    let canonicalId = /^tt\d+$/i.test(normalizedId) ? normalizedId : "";
++    if (!canonicalId) {
++      const resolved = await this.withTimeout(this.resolveCanonicalId(normalizedType, options), 2000).catch(() => "");
++      canonicalId = typeof resolved === "string" ? resolved : "";
++    }
++    const idCandidates = this.uniqueNonEmpty([canonicalId, normalizedId, rawId]);
++    const addons = await addonRepository.getInstalledAddons({ cacheOnly: true });
++    const requests = [];
++    const seen = new Set();
++    (addons || [])
++      .filter((addon) =>
++        (addon.resources || []).some(
++          (resource) => this.isSubtitleResource(resource?.name) && this.supportsType(resource, normalizedType, normalizedId)
++        )
++      )
++      .forEach((addon) => {
++        const candidateIds = this.buildActualIdCandidates(normalizedType, idCandidates, videoId, {
++          ...options,
++          idPrefixes: addon?.idPrefixes
++        });
++        candidateIds.forEach((actualId) => {
++          const url = this.buildSubtitlesUrl(addon.baseUrl, normalizedType, actualId, options);
++          if (url && !seen.has(url)) {
++            seen.add(url);
++            requests.push({ url, addon: addon.displayName || addon.name || "" });
++          }
++        });
++      });
++    return requests;
++  }
++
+   async fetchSubtitlesFromAddon(addon, type, idCandidates = [], videoId, options = {}) {
+     const candidateIds = this.buildActualIdCandidates(type, idCandidates, videoId, {
+       ...options,
+diff --git a/js/platform/index.js b/js/platform/index.js
+index ac5c1e2..57586e5 100644
+--- a/js/platform/index.js
++++ b/js/platform/index.js
+@@ -1,11 +1,14 @@
+ import { browserAdapter } from "./adapters/browserAdapter.js";
+ import { webosAdapter } from "./adapters/webosAdapter.js";
+ import { tizenAdapter } from "./adapters/tizenAdapter.js";
++import { ps5Adapter } from "./adapters/ps5Adapter.js";
++import { isPs5UserAgent } from "./ps5/ps5Service.js";
+ 
+ const ADAPTERS = {
+   browser: browserAdapter,
+   webos: webosAdapter,
+-  tizen: tizenAdapter
++  tizen: tizenAdapter,
++  ps5: ps5Adapter
+ };
+ 
+ function parseWebOsMajorVersion() {
+@@ -57,6 +60,9 @@ function detectPlatformName() {
+   if (override && ADAPTERS[override]) {
+     return override;
+   }
++  if (isPs5UserAgent()) {
++    return "ps5";
++  }
+   const searchParams = String(globalThis.location?.search || "").toLowerCase();
+   if (searchParams.includes("wrapper=tizen")) {
+     return "tizen";
+@@ -121,6 +127,16 @@ export const Platform = {
+     return this.getName() === "browser";
+   },
+ 
++  isPS5() {
++    return getAdapter().isPs5 === true;
++  },
++
++  // Platforms driven by an on-screen pointer (LG Magic Remote, PS5 cursor):
++  // hovering focuses items and a click activates them.
++  usesPointerRemote() {
++    return this.isWebOS() || this.isPS5();
++  },
++
+   exitApp() {
+     if (globalThis.document && typeof globalThis.CustomEvent === "function") {
+       const beforeExitEvent = new CustomEvent("nuvio:beforeExitApp", {
+diff --git a/js/platform/pluginServiceClient.js b/js/platform/pluginServiceClient.js
+index 88b3ea1..ecd0153 100644
+--- a/js/platform/pluginServiceClient.js
++++ b/js/platform/pluginServiceClient.js
+@@ -1,6 +1,7 @@
+ import { Platform } from "./index.js";
+ import { TizenCapabilities } from "./tizen/tizenCapabilities.js";
+ import { TizenPluginService } from "./tizen/tizenPluginService.js";
++import { Ps5PluginService } from "./ps5/ps5PluginService.js";
+ import { WebOsPluginService } from "./webos/webosPluginService.js";
+ import {
+   normalizePluginHeaders,
+@@ -31,6 +32,7 @@ let lastHealthDiagnostic = "";
+ export const PLUGIN_PROTOCOL_VERSION = 1;
+ 
+ function serviceForPlatform() {
++  if (Platform.isPS5()) return Ps5PluginService;
+   if (Platform.isTizen()) return TizenPluginService;
+   if (Platform.isWebOS()) return WebOsPluginService;
+   return null;
+@@ -413,7 +415,7 @@ export const PluginServiceClient = {
+       if (!areTizenPluginsSupported()) {
+         throw new Error(TIZEN_PLUGIN_UNSUPPORTED_DETAIL);
+       }
+-      if (Platform.isBrowser()) {
++      if (Platform.isBrowser() && !Platform.isPS5()) {
+         if (globalThis.__NUVIO_ALLOW_BROWSER_PLUGIN_RUNTIME__ !== true)
+           throw new Error("Plugin execution is TV-only");
+         const result = await directBrowserFetch(request);
+diff --git a/js/ui/navigation/focusEngine.js b/js/ui/navigation/focusEngine.js
+index 465db26..cc8846a 100644
+--- a/js/ui/navigation/focusEngine.js
++++ b/js/ui/navigation/focusEngine.js
+@@ -59,7 +59,7 @@ export const FocusEngine = {
+     this.boundHandlePointerClick = this.handlePointerClick.bind(this);
+     document.addEventListener("keydown", this.boundHandleKey, true);
+     document.addEventListener("keyup", this.boundHandleKeyUp, true);
+-    if (Platform.isWebOS()) {
++    if (Platform.usesPointerRemote()) {
+       document.addEventListener("mousemove", this.boundHandlePointerMove, true);
+       document.addEventListener("pointermove", this.boundHandlePointerMove, true);
+       document.addEventListener("click", this.boundHandlePointerClick, true);
+@@ -272,7 +272,7 @@ export const FocusEngine = {
+   },
+ 
+   handlePointerMove(event) {
+-    if (!Platform.isWebOS()) {
++    if (!Platform.usesPointerRemote()) {
+       return;
+     }
+     this.pendingPointerMoveEvent = event;
+@@ -293,7 +293,7 @@ export const FocusEngine = {
+   },
+ 
+   processPointerMove(event) {
+-    if (!Platform.isWebOS()) {
++    if (!Platform.usesPointerRemote()) {
+       return;
+     }
+     const currentScreen = Router.getCurrentScreen();
+@@ -309,7 +309,7 @@ export const FocusEngine = {
+   },
+ 
+   handlePointerClick(event) {
+-    if (!Platform.isWebOS()) {
++    if (!Platform.usesPointerRemote()) {
+       return;
+     }
+     const target = this.getPointerFocusable(event);
+diff --git a/js/ui/screens/player/playerScreenMethods-01-mount.js b/js/ui/screens/player/playerScreenMethods-01-mount.js
+index 8b5b37e..a81bfa2 100644
+--- a/js/ui/screens/player/playerScreenMethods-01-mount.js
++++ b/js/ui/screens/player/playerScreenMethods-01-mount.js
+@@ -1,5 +1,7 @@
+ /* global __NUVIO_APP_VERSION__ */
+ import * as internals from "./playerScreenContext.js";
++import { Platform } from "../../../platform/index.js";
++import { Ps5NativePlayer } from "../../../platform/ps5/ps5NativePlayer.js";
+ import { initializePlayerMountState } from "./playerMountStateInitialization.js";
+ 
+ export function createPlayerScreenMethods01() {
+@@ -39,6 +41,13 @@ export function createPlayerScreenMethods01() {
+       this.container = document.getElementById("player");
+       this.container.style.display = "block";
+       this.container.classList.toggle("player-platform-webos", Environment.isWebOS());
++      // PS5 app: the native player takes over (or this is the return trip from
++      // it), so the web player's own screen must not flash up first - plain
++      // black until the native player appears or the page moves on.
++      this.container.classList.toggle(
++        "player-ps5-native-handoff",
++        Platform.isPS5() && (Boolean(params?.ps5NativeReturn) || Ps5NativePlayer.available !== false)
++      );
+       const mountToken = Number(this.playerMountToken || 0) + 1;
+       this.playerMountToken = mountToken;
+       this.playerRouteActive = true;
+diff --git a/js/ui/screens/player/playerScreenMethods-18-start-player-controller-playback.js b/js/ui/screens/player/playerScreenMethods-18-start-player-controller-playback.js
+index 6ab3853..80cea2e 100644
+--- a/js/ui/screens/player/playerScreenMethods-18-start-player-controller-playback.js
++++ b/js/ui/screens/player/playerScreenMethods-18-start-player-controller-playback.js
+@@ -1,9 +1,19 @@
+ /* eslint-disable no-unused-vars */
+ import * as internals from "./playerScreenContext.js";
++import { Platform } from "../../../platform/index.js";
++import { Ps5NativePlayer, plainCopy } from "../../../platform/ps5/ps5NativePlayer.js";
++import { ProfileManager } from "../../../core/profile/profileManager.js";
+ 
+ export function createPlayerScreenMethods18() {
+   const {
+     PlayerController,
++    PlayerSettingsStore,
++    Router,
++    TrackingScrobbleService,
++    subtitleRepository,
++    episodeThumbnailUrl,
++    streamDirectPlaybackUrl,
++    SUBTITLE_VERTICAL_OFFSET_DEFAULT,
+     isExpiredStreamUrl,
+     LOADING_LOGO_FILL_TARGET_LERP,
+     LOADING_LOGO_FILL_IDLE_STEP,
+@@ -15,6 +25,11 @@ export function createPlayerScreenMethods18() {
+ 
+   return {
+     startPlayerControllerPlayback(url, context = {}, { mountToken = null, sourceCandidate = null } = {}) {
++      if (Platform.isPS5() && this.params?.ps5NativeReturn) {
++        // Nuvio reopened after the native player: finish that playback here
++        // (before any check on the stream url, which may have expired since).
++        return this.finishPs5NativePlayback(this.params.ps5NativeReturn);
++      }
+       const playbackUrl = String(url || "").trim();
+       if (!playbackUrl) {
+         this.showStartupError(t("player_error_no_stream_url", {}, "No stream URL provided"), {
+@@ -40,6 +55,36 @@ export function createPlayerScreenMethods18() {
+         ...(context && typeof context === "object" ? context : {}),
+         ...(Object.keys(requestHeaders).length ? { requestHeaders } : {})
+       };
++      // PS5: inside the Nuvio app, streams play on its native Nuvio Player
++      // (4K / HDR / Matroska / DTS). Without it - the plain PS5 browser - or if
++      // the hand-off fails, fall back to the browser's own playback.
++      if (Platform.isPS5() && Ps5NativePlayer.available !== false) {
++        const retry = () => {
++          this.container?.classList.remove("player-ps5-native-handoff");
++          return this.startPlayerControllerPlayback(url, context, { mountToken, sourceCandidate });
++        };
++        return Ps5NativePlayer.isAvailable().then(async (native) => {
++          if (!native) return retry();
++          const restore = this.pendingPlaybackRestore || {};
++          const startPosition =
++            Number(restore.timeSeconds) ||
++            (Number(restore.progressPercent) > 0 && Number(restore.durationSeconds) > 0
++              ? (Number(restore.progressPercent) / 100) * Number(restore.durationSeconds)
++              : 0);
++          let request;
++          try {
++            request = await this.buildPs5NativeRequest(playbackUrl, playbackContext, requestHeaders, startPosition, sourceCandidate);
++          } catch (error) {
++            console.warn("PS5 native request build failed", error);
++            request = { url: playbackUrl, headers: requestHeaders, startPosition, title: String(this.params?.playerTitle || "") };
++          }
++          if (!this.isActiveMountToken(mountToken)) return undefined;
++          return Ps5NativePlayer.play(request).catch(() => {
++            Ps5NativePlayer.available = false;
++            return retry();
++          });
++        });
++      }
+       PlayerController.setStartupPresentationAudioMuted?.(true);
+       return Promise.resolve(PlayerController.play(playbackUrl, playbackContext)).catch((error) => {
+         if (!this.isActiveMountToken(mountToken) || this.isExternalFrameMode()) {
+@@ -91,6 +136,331 @@ export function createPlayerScreenMethods18() {
+         });
+       });
+     },
++    // Everything the PS5 app's native player shows and needs, so its controls
++    // are Nuvio's: what is playing, the other sources, the episodes, the
++    // subtitle addons to ask, the viewer's settings and Nuvio's own wording,
++    // plus a context the page gets back when it reopens.
++    async buildPs5NativeRequest(playbackUrl, playbackContext, requestHeaders, startPosition, sourceCandidate) {
++      const p = this.params || {};
++      const settings = PlayerSettingsStore.get();
++      const style = settings.subtitleStyle || {};
++      const meta = (typeof this.buildPauseOverlayMeta === "function" && this.buildPauseOverlayMeta()) || {};
++      const current = sourceCandidate || this.getCurrentStreamCandidate?.() || null;
++      const headersOf = (stream) => {
++        try {
++          return this.getCurrentStreamRequestHeaders(stream) || {};
++        } catch (_) {
++          return {};
++        }
++      };
++
++      const sources = [];
++      let sourceIndex = 0;
++      (Array.isArray(this.streamCandidates) ? this.streamCandidates : []).forEach((stream) => {
++        if (sources.length >= 60) return;
++        const url = streamDirectPlaybackUrl(stream) || "";
++        if (!url || isExpiredStreamUrl(url)) return;
++        if (current && (stream === current || (stream.id && stream.id === current.id) || url === playbackUrl)) {
++          sourceIndex = sources.length;
++        }
++        sources.push({
++          id: String(stream.id || ""),
++          title: String(stream.title || stream.name || "").trim(),
++          description: String(stream.description || "").trim(),
++          addon: String(stream.addonName || stream.addon || "").trim(),
++          url,
++          headers: headersOf(stream)
++        });
++      });
++
++      const episodes = (Array.isArray(this.episodes) ? this.episodes : []).slice(0, 400).map((episode) => ({
++        season: Number(episode?.season ?? 0),
++        episode: Number(episode?.episode ?? 0),
++        title: String(episode?.title || episode?.name || "").trim(),
++        thumbnail: episodeThumbnailUrl(episode) || "",
++        videoId: String(episode?.id || ""),
++        overview: String(episode?.overview || episode?.description || "").trim(),
++        released: this.hasEpisodeAired?.(episode?.released) !== false,
++        releasedLabel: episode?.released ? String(episode.released).slice(0, 10) : ""
++      }));
++      const next = this.resolveNextEpisodeInfo?.() || null;
++      const nextEntry = next ? (this.episodes || []).find((e) => String(e?.id || "") === String(next.videoId || "")) : null;
++
++      let subtitleRequests = [];
++      try {
++        const lookup = this.buildSubtitleLookupContext();
++        if (lookup?.id && lookup?.type) {
++          subtitleRequests = await subtitleRepository.buildSubtitleRequests(lookup.type, lookup.id, lookup.videoId || null, {
++            season: lookup.season,
++            episode: lookup.episode,
++            title: lookup.title,
++            year: lookup.year,
++            videoHash: lookup.videoHash || null,
++            videoSize: lookup.videoSize || null,
++            filename: lookup.filename || null
++          });
++        }
++      } catch (error) {
++        console.warn("PS5 native subtitle lookup failed", error);
++      }
++      let sidecar = [];
++      try {
++        sidecar = (this.collectStreamSidecarSubtitles?.() || [])
++          .filter((sub) => sub?.url)
++          .map((sub) => ({ url: sub.url, lang: sub.lang || "", label: sub.addonName || "", headers: sub.headers || {} }));
++      } catch (_) {
++        sidecar = [];
++      }
++
++      const languageOf = (value) => {
++        const v = String(value || "").trim();
++        if (!v || v === "off" || v === "none" || v === "original") return "";
++        if (v === "system") return String(globalThis.navigator?.language || "").split("-")[0];
++        return v;
++      };
++      const background = String(style.backgroundColor || "#00000000");
++      const backgroundAlpha = /^#[0-9a-f]{8}$/i.test(background) ? parseInt(background.slice(7, 9), 16) / 255 : 0;
++      let clock24h = true;
++      try {
++        const cycle = new Intl.DateTimeFormat(undefined, { hour: "numeric" }).resolvedOptions().hourCycle;
++        clock24h = !cycle || cycle === "h23" || cycle === "h24";
++      } catch (_) {
++        clock24h = true;
++      }
++
++      const progressContext = {
++        itemId: playbackContext?.itemId || p.itemId || null,
++        itemType: playbackContext?.itemType || p.itemType || "movie",
++        imdbId: playbackContext?.imdbId || p.imdbId || null,
++        tmdbId: playbackContext?.tmdbId || p.tmdbId || null,
++        traktId: playbackContext?.traktId || p.traktId || null,
++        videoId: playbackContext?.videoId || p.videoId || null,
++        season: Number.isFinite(Number(p.season)) && p.season != null ? Number(p.season) : null,
++        episode: Number.isFinite(Number(p.episode)) && p.episode != null ? Number(p.episode) : null,
++        title: playbackContext?.title || p.playerTitle || p.itemTitle || null,
++        poster: playbackContext?.poster || p.poster || null,
++        background: playbackContext?.background || p.playerBackdropUrl || null,
++        episodeTitle: playbackContext?.episodeTitle || p.playerEpisodeTitle || null,
++        streamIdentity: playbackContext?.streamIdentity || null
++      };
++      if (!["series", "tv", "cloud"].includes(String(progressContext.itemType).toLowerCase())) {
++        progressContext.videoId = null;
++      }
++      const { ps5NativeReturn: _ignored, ...playerParams } = p;
++      const stack = Array.isArray(Router.stack) ? Router.stack : [];
++
++      const tr = (key, fallback, params = {}) => t(key, params, fallback);
++      return {
++        url: playbackUrl,
++        headers: requestHeaders || {},
++        startPosition,
++        title: String(p.playerTitle || p.itemTitle || meta.title || "").trim(),
++        episodeTitle: String(p.playerEpisodeTitle || meta.episodeTitle || "").trim(),
++        season: p.season ?? null,
++        episode: p.episode ?? null,
++        year: String(p.playerReleaseYear || p.releaseYear || p.year || meta.releaseYear || "").trim(),
++        description: String(p.playerDescription || meta.description || "").trim(),
++        itemType: String(p.itemType || "movie"),
++        logo: String(p.playerLogoUrl || p.logo || meta.logoUrl || ""),
++        background: String(p.playerBackdropUrl || p.backdrop || p.poster || ""),
++        poster: String(p.playerPosterUrl || p.poster || ""),
++        stream: {
++          title: String(current?.title || current?.name || "").trim(),
++          description: String(current?.description || "").trim(),
++          addon: String(current?.addonName || "").trim()
++        },
++        sources,
++        sourceIndex,
++        subtitles: sidecar,
++        subtitleRequests,
++        episodes,
++        nextEpisode: next
++          ? {
++              season: next.season,
++              episode: next.episode,
++              title: next.episodeTitle || "",
++              thumbnail: episodeThumbnailUrl(nextEntry) || "",
++              videoId: next.videoId,
++              released: next.hasAired !== false,
++              releasedLabel: next.released ? String(next.released).slice(0, 10) : ""
++            }
++          : null,
++        skipIntervals: (Array.isArray(this.skipIntervals) ? this.skipIntervals : [])
++          .map((interval) => ({
++            type: String(interval?.type || "intro").toLowerCase(),
++            start: Number(interval?.startTime ?? interval?.start ?? -1),
++            end: Number(interval?.endTime ?? interval?.end ?? -1)
++          }))
++          .filter((interval) => interval.end > interval.start && interval.start >= 0),
++        autoplayCount: Number(this.consecutiveAutoPlayCount || p.consecutiveAutoPlayCount || 0),
++        prefs: {
++          audioLanguages: [settings.preferredAudioLanguage, settings.secondaryPreferredAudioLanguage].map(languageOf).filter(Boolean),
++          subtitleLanguages: [style.preferredLanguage ?? settings.subtitleLanguage, style.secondaryPreferredLanguage]
++            .map(languageOf)
++            .filter(Boolean),
++          subtitlesEnabled: settings.subtitlesEnabled !== false && String(style.preferredLanguage || "") !== "off",
++          forcedOnlyWhenOff: style.useForcedSubtitles !== false,
++          subtitleStyle: {
++            size: Number(style.fontSize || 100),
++            color: String(style.textColor || "#FFFFFF"),
++            bold: Boolean(style.bold),
++            outline: style.outlineEnabled !== false,
++            background: backgroundAlpha,
++            offset: Math.max(0, Number(style.verticalOffset || 0) - Number(SUBTITLE_VERTICAL_OFFSET_DEFAULT || 0))
++          },
++          autoplayNext: Boolean(settings.autoplayNextEpisode),
++          nextThresholdMode: settings.nextEpisodeThresholdMode,
++          nextThresholdPercent: settings.nextEpisodeThresholdPercent,
++          nextThresholdMinutes: settings.nextEpisodeThresholdMinutesBeforeEnd,
++          skipIntro: settings.skipIntroEnabled !== false,
++          stillWatchingEpisodes: settings.stillWatchingEnabled ? Number(settings.stillWatchingEpisodeThreshold || 3) : 0,
++          clock: settings.osdClockEnabled !== false,
++          clock24h,
++          tzOffsetMinutes: -new Date().getTimezoneOffset()
++        },
++        strings: {
++          subtitles: tr("subtitle_dialog_title", "Subtitles"),
++          audio: tr("audio_dialog_title", "Audio"),
++          sources: tr("sources_title", "Sources"),
++          episodes: tr("episodes_panel_title", "Episodes"),
++          next_episode: tr("next_episode_label", "Next episode"),
++          ends_at: t("player_ends_at", ["%1$s"], "Ends at %1$s"),
++          youre_watching: tr("pause_you_are_watching", "You're watching"),
++          playback_error: tr("player_error_title", "Playback Error"),
++          go_back: tr("player_go_back", "Go Back"),
++          aspect_ratio: tr("player_more_aspect_ratio", "Aspect Ratio"),
++          play: tr("still_watching_continue", "Play"),
++          off: tr("subtitle_off", "Off"),
++          on: tr("ps5_native_on", "On"),
++          playing: tr("ps5_native_playing", "Playing"),
++          season: tr("season", "Season"),
++          specials: tr("specials", "Specials"),
++          episode: tr("episode", "Episode"),
++          language: tr("ps5_native_language", "Language"),
++          track: tr("ps5_native_track", "Track"),
++          style: tr("ps5_native_style", "Style"),
++          delay: tr("ps5_native_delay", "Delay"),
++          size: tr("ps5_native_size", "Size"),
++          position: tr("ps5_native_position", "Position"),
++          background: tr("ps5_native_background", "Background"),
++          outline: tr("ps5_native_outline", "Outline"),
++          bold: tr("ps5_native_bold", "Bold"),
++          built_in: tr("ps5_native_built_in", "Built-in"),
++          addon: tr("ps5_native_addon", "Addon"),
++          forced: tr("ps5_native_forced", "Forced"),
++          default: tr("ps5_native_default", "Default"),
++          loading: tr("ps5_native_loading", "Loading\u2026"),
++          unavailable: tr("ps5_native_unavailable", "Unavailable"),
++          no_subtitles: tr("ps5_native_no_subtitles", "No subtitles found for this stream"),
++          subtitles_off: tr("ps5_native_subtitles_off", "Subtitles are off"),
++          no_audio_tracks: tr("ps5_native_no_audio", "No other audio tracks"),
++          unknown_language: tr("ps5_native_unknown_language", "Unknown"),
++          opening: tr("ps5_native_opening", "Opening stream\u2026"),
++          buffering: tr("ps5_native_buffering", "Buffering\u2026"),
++          skip_intro: tr("skip_intro", "Skip Intro"),
++          skip_recap: tr("skip_recap", "Skip Recap"),
++          upcoming: tr("ps5_native_upcoming", "Upcoming"),
++          next_in: tr("ps5_native_next_in", "Playing in %1$s"),
++          press_to_play_next: tr("ps5_native_press_to_play", "Press \u2715 to play"),
++          open_failed: tr(
++            "ps5_native_open_failed",
++            "This stream could not be opened. The link may have expired, or the source is unavailable."
++          ),
++          decode_failed: tr("ps5_native_decode_failed", "This video could not be decoded."),
++          did_not_start: tr("ps5_native_did_not_start", "Playback did not start. The source may be too slow or unavailable."),
++          audio_switch_failed: tr("ps5_native_audio_failed", "That audio track could not be played"),
++          aspect_fit: tr("ps5_native_aspect_fit", "Fit"),
++          aspect_fill: tr("ps5_native_aspect_fill", "Fill"),
++          aspect_stretch: tr("ps5_native_aspect_stretch", "Stretch")
++        },
++        // Returned untouched with the result (the app never sees it).
++        context: plainCopy({
++          version: 1,
++          profileId: ProfileManager.getActiveProfileId(),
++          stack: stack.slice(-12),
++          playerParams,
++          progressContext,
++          scrobble: typeof this.buildScrobbleContext === "function" ? this.buildScrobbleContext() : null
++        })
++      };
++    },
++    // Nuvio has reopened on this player route after the native player: save
++    // the progress, tell Trakt/Simkl, then do what the viewer chose there.
++    async finishPs5NativePlayback(nativeReturn) {
++      const result = nativeReturn?.result || {};
++      const context = nativeReturn?.context || {};
++      const positionMs = Math.max(0, Math.round(Number(result.position || 0) * 1000));
++      const durationMs = Math.max(0, Math.round(Number(result.duration || 0) * 1000));
++      if (this.params) this.params.ps5NativeReturn = null;
++      try {
++        if (context.progressContext?.itemId && positionMs > 0 && durationMs > 0) {
++          await PlayerController.flushProgress(positionMs, durationMs, false, context.progressContext, {
++            allowCloudSync: true,
++            syncRemote: true
++          });
++        }
++      } catch (error) {
++        console.warn("PS5 native progress save failed", error);
++      }
++      try {
++        if (TrackingScrobbleService.isEnabled() && context.scrobble && positionMs > 0 && durationMs > 0) {
++          TrackingScrobbleService.stop({
++            ...context.scrobble,
++            positionMs,
++            durationMs,
++            progressPercent: Math.min(100, (positionMs / durationMs) * 100)
++          });
++        }
++      } catch (error) {
++        console.warn("PS5 native scrobble failed", error);
++      }
++
++      const action = result.action || null;
++      if (action?.type === "next") {
++        this.consecutiveAutoPlayCount = Number(this.params?.consecutiveAutoPlayCount || 0);
++        return this.playNextEpisode({ userInitiated: result.state !== "ended" });
++      }
++      if (action?.type === "episode") {
++        const target = (this.episodes || []).find(
++          (episode) => Number(episode?.season) === Number(action.season) && Number(episode?.episode) === Number(action.episode)
++        );
++        if (target) {
++          return this.openNextEpisodeStreamPicker(
++            {
++              videoId: target.id,
++              season: target.season,
++              episode: target.episode,
++              episodeTitle: target.title || "",
++              episodeLabel: `S${target.season}E${target.episode}`
++            },
++            { forceReload: true }
++          );
++        }
++      }
++      if (result.state === "error") {
++        this.container?.classList.remove("player-ps5-native-handoff");
++        this.showStartupError(String(result.error || t("player_error_playback_fallback", {}, "Playback error")), {
++          streamCandidate: this.getCurrentStreamCandidate?.() || null,
++          reason: "ps5-native"
++        });
++        return undefined;
++      }
++      // The browser history from before the reload is gone, so the router must
++      // rebuild the previous screen rather than traverse history to it.
++      const historyInitialized = Router.historyInitialized;
++      Router.historyInitialized = false;
++      let outcome;
++      try {
++        outcome = this.navigateBackToStreamScreen();
++      } finally {
++        Router.historyInitialized = historyInitialized;
++      }
++      const stack = Array.isArray(Router.stack) ? Router.stack : [];
++      if (stack.length && stack[stack.length - 1]?.route === Router.current) {
++        stack.pop();   /* that screen is now the current one, not one Back away */
++      }
++      return outcome;
++    },
+     getStartupErrorMessage(mediaErrorCode = 0, detail = "", streamCandidate = this.getCurrentStreamCandidate()) {
+       const code = Number(mediaErrorCode || 0);
+       const compatibilityMessage = this.getWebHeaderRestrictedStreamMessage(streamCandidate);
+diff --git a/js/ui/screens/search/searchScreenMethods-05-ensure-header-visible.js b/js/ui/screens/search/searchScreenMethods-05-ensure-header-visible.js
+index 8242b53..b0c4585 100644
+--- a/js/ui/screens/search/searchScreenMethods-05-ensure-header-visible.js
++++ b/js/ui/screens/search/searchScreenMethods-05-ensure-header-visible.js
+@@ -3,6 +3,7 @@ import * as internals from "./searchScreen.js";
+ 
+ export function createSearchScreenMethods05() {
+   const {
++    Platform,
+     SEARCH_HISTORY_MAX_ITEMS,
+     SearchHistoryStore,
+     MODERN_HOME_CONSTANTS,
+@@ -226,9 +227,24 @@ export function createSearchScreenMethods05() {
+ 
+       input.addEventListener("input", (event) => {
+         this.query = trimLeadingWhitespace(event.target?.value || "");
++        if (Platform.isPS5() && document.activeElement === input) {
++          // The PS5 system keyboard closes as soon as the results re-render,
++          // so search once typing is finished (Done, Enter or leaving the box).
++          return;
++        }
+         this.scheduleSearchFromInput(input);
+       });
+ 
++      if (Platform.isPS5()) {
++        const searchWhenTypingEnds = () => {
++          if (String(this.query || "").trim() === String(this.lastSubmittedQuery || "").trim()) return;
++          this.cancelScheduledInputSearch();
++          void this.runSearchFromInput(input, { autoFocusResults: false, rememberToHistory: true });
++        };
++        input.addEventListener("change", searchWhenTypingEnds);
++        input.addEventListener("blur", searchWhenTypingEnds);
++      }
++
+       input.addEventListener("focus", () => {
+         const current = this.container?.querySelector(".focusable.focused") || null;
+         if (current !== input) {
+diff --git a/scripts/build.mjs b/scripts/build.mjs
+index be1471c..67b54e1 100644
+--- a/scripts/build.mjs
++++ b/scripts/build.mjs
+@@ -609,6 +609,7 @@ async function runBuild() {
+       cp(path.join(rootDir, "assets"), path.join(distDir, "assets"), { recursive: true }),
+       cp(path.join(rootDir, "res"), path.join(distDir, "res"), { recursive: true }),
+       cp(path.join(rootDir, "boot-guard.js"), path.join(distDir, "boot-guard.js")),
++      cp(path.join(rootDir, "ps5-boot.js"), path.join(distDir, "ps5-boot.js")),
+       cp(path.join(rootDir, "docs", "youtube-proxy.html"), path.join(distDir, "youtube-proxy.html"))
+     ]);
+     await buildI18nBundles({ rootDir, distDir });
+diff --git a/js/platform/adapters/ps5Adapter.js b/js/platform/adapters/ps5Adapter.js
+new file mode 100644
+index 0000000..d82ec1a
+--- /dev/null
++++ b/js/platform/adapters/ps5Adapter.js
+@@ -0,0 +1,62 @@
++import { isBackEvent, normalizeKeyEvent } from "../sharedKeys.js";
++import { Ps5Diagnostics } from "../ps5/ps5Diagnostics.js";
++import { Ps5Input } from "../ps5/ps5Input.js";
++
++// The PS5 browser reports Circle as Escape or Backspace depending on context.
++const PS5_BACK_CODES = [27, 8, 461, 10009];
++
++// Runs inside the PS5 system browser, so it keeps the "browser" platform name
++// for feature checks and adds console-specific input, services and fixes.
++export const ps5Adapter = {
++  name: "browser",
++  isPs5: true,
++
++  init() {
++    // Plugins run in the app's QuickJS worker; their network requests go to
++    // the nuvio-ps5 payload (see Ps5PluginService), not the browser's fetch.
++    globalThis.__NUVIO_ALLOW_BROWSER_PLUGIN_RUNTIME__ = true;
++    document.documentElement?.classList?.add("ps5-browser");
++    Ps5Diagnostics.init();
++    Ps5Input.init();
++  },
++
++  exitApp() {
++    // Inside the Nuvio app, EVO serves this page and owns the exit: closing
++    // through it releases the player and GPU before the app parks.
++    if (typeof globalThis.__evoExit === "function") {
++      globalThis.__evoExit();
++      return;
++    }
++    try {
++      globalThis.close?.();
++    } catch (_) {
++      // The system browser may refuse window.close(); the PS button still exits.
++    }
++  },
++
++  isBackEvent(event) {
++    return isBackEvent(event, PS5_BACK_CODES);
++  },
++
++  normalizeKey(event) {
++    return normalizeKeyEvent(event, PS5_BACK_CODES);
++  },
++
++  getDeviceLabel() {
++    return "PlayStation 5";
++  },
++
++  getCapabilities() {
++    return {
++      hlsJs: Boolean(globalThis.Hls?.isSupported?.()),
++      dashJs: Boolean(globalThis.dashjs?.MediaPlayer),
++      nativeVideo: true,
++      webosAvplay: false,
++      tizenAvplay: false
++    };
++  },
++
++  prepareVideoElement(videoElement) {
++    videoElement?.setAttribute?.("playsinline", "");
++  }
++};
+diff --git a/js/platform/ps5/ps5Diagnostics.js b/js/platform/ps5/ps5Diagnostics.js
+new file mode 100644
+index 0000000..0fd9455
+--- /dev/null
++++ b/js/platform/ps5/ps5Diagnostics.js
+@@ -0,0 +1,187 @@
++import { ps5Log } from "./ps5Service.js";
++
++const VIDEO_TYPES = [
++  'video/mp4; codecs="avc1.640028"',
++  'video/mp4; codecs="avc1.640033"',
++  'video/mp4; codecs="hvc1.1.6.L150.B0"',
++  'video/mp4; codecs="hev1.1.6.L150.B0"',
++  'video/mp4; codecs="hvc1.2.4.L153.B0"',
++  'video/mp4; codecs="av01.0.08M.08"',
++  'video/mp4; codecs="vp09.00.40.08"',
++  'video/webm; codecs="vp9"',
++  'video/webm; codecs="vp8"',
++  "video/x-matroska",
++  "video/mp2t",
++  "application/vnd.apple.mpegurl",
++  "application/x-mpegurl",
++  "application/dash+xml"
++];
++const AUDIO_TYPES = [
++  'audio/mp4; codecs="mp4a.40.2"',
++  'audio/mp4; codecs="ac-3"',
++  'audio/mp4; codecs="ec-3"',
++  'audio/mp4; codecs="dtsc"',
++  'audio/mp4; codecs="opus"',
++  'audio/mp4; codecs="flac"',
++  'audio/webm; codecs="opus"',
++  "audio/mpeg"
++];
++
++function probe(types, test) {
++  const result = {};
++  types.forEach((type) => {
++    try {
++      result[type] = test(type);
++    } catch (error) {
++      result[type] = `error: ${String(error?.message || error)}`;
++    }
++  });
++  return result;
++}
++
++function collectEnvironment() {
++  const video = document.createElement("video");
++  const MediaSourceRef = globalThis.MediaSource || globalThis.WebKitMediaSource;
++  const managedMediaSource = globalThis.ManagedMediaSource;
++  return {
++    userAgent: navigator.userAgent,
++    platform: navigator.platform,
++    language: navigator.language,
++    screen: {
++      width: screen.width,
++      height: screen.height,
++      availWidth: screen.availWidth,
++      availHeight: screen.availHeight
++    },
++    viewport: {
++      innerWidth: innerWidth,
++      innerHeight: innerHeight,
++      clientWidth: document.documentElement.clientWidth,
++      clientHeight: document.documentElement.clientHeight,
++      devicePixelRatio: globalThis.devicePixelRatio
++    },
++    features: {
++      worker: typeof Worker === "function",
++      webAssembly: typeof globalThis.WebAssembly === "object",
++      mediaSource: Boolean(MediaSourceRef),
++      managedMediaSource: Boolean(managedMediaSource),
++      fullscreen: Boolean(
++        document.documentElement.requestFullscreen ||
++        document.documentElement.webkitRequestFullscreen
++      ),
++      fullscreenEnabled: Boolean(document.fullscreenEnabled || document.webkitFullscreenEnabled),
++      gamepads: typeof navigator.getGamepads === "function",
++      pointerEvents: typeof PointerEvent === "function",
++      localStorage: (() => {
++        try {
++          localStorage.setItem("__ps5probe", "1");
++          localStorage.removeItem("__ps5probe");
++          return true;
++        } catch (_) {
++          return false;
++        }
++      })(),
++      indexedDB: typeof indexedDB === "object",
++      serviceWorker: "serviceWorker" in navigator,
++      abortController: typeof AbortController === "function",
++      textDecoder: typeof TextDecoder === "function",
++      cssGrid: CSS?.supports?.("display", "grid") === true,
++      webkitAudioContext: typeof globalThis.webkitAudioContext === "function",
++      audioContext: typeof globalThis.AudioContext === "function"
++    },
++    canPlayType: probe([...VIDEO_TYPES, ...AUDIO_TYPES], (type) => video.canPlayType(type)),
++    mseTypeSupported: MediaSourceRef?.isTypeSupported
++      ? probe([...VIDEO_TYPES, ...AUDIO_TYPES], (type) => MediaSourceRef.isTypeSupported(type))
++      : null
++  };
++}
++
++// Whether the browser path could ever be HDR / 4K on this console.
++async function probeHdrAnd4k() {
++  const result = {
++    dynamicRangeHigh: globalThis.matchMedia?.("(dynamic-range: high)")?.matches ?? null,
++    videoDynamicRangeHigh: globalThis.matchMedia?.("(video-dynamic-range: high)")?.matches ?? null,
++    colorGamutRec2020: globalThis.matchMedia?.("(color-gamut: rec2020)")?.matches ?? null,
++    colorDepth: globalThis.screen?.colorDepth ?? null,
++    decodingInfo: {}
++  };
++  const capabilities = globalThis.navigator?.mediaCapabilities;
++  if (typeof capabilities?.decodingInfo !== "function") return result;
++  const configs = {
++    hevc4kPq: {
++      contentType: 'video/mp4; codecs="hvc1.2.4.L153.B0"',
++      width: 3840, height: 2160, bitrate: 25000000, framerate: 24,
++      transferFunction: "pq", colorGamut: "rec2020", hdrMetadataType: "smpteSt2086"
++    },
++    hevc4kSdr: {
++      contentType: 'video/mp4; codecs="hvc1.1.6.L153.B0"',
++      width: 3840, height: 2160, bitrate: 25000000, framerate: 24
++    },
++    avc1080: {
++      contentType: 'video/mp4; codecs="avc1.640028"',
++      width: 1920, height: 1080, bitrate: 8000000, framerate: 24
++    }
++  };
++  for (const [name, video] of Object.entries(configs)) {
++    try {
++      const info = await capabilities.decodingInfo({ type: "media-source", video });
++      result.decodingInfo[name] = {
++        supported: info.supported,
++        smooth: info.smooth,
++        powerEfficient: info.powerEfficient
++      };
++    } catch (error) {
++      result.decodingInfo[name] = `error: ${String(error?.message || error)}`;
++    }
++  }
++  return result;
++}
++
++function hookErrors() {
++  window.addEventListener("error", (event) => {
++    ps5Log("error", "window error", {
++      message: String(event?.message || ""),
++      source: String(event?.filename || ""),
++      line: event?.lineno,
++      column: event?.colno,
++      stack: String(event?.error?.stack || "").slice(0, 1600)
++    });
++  });
++  window.addEventListener("unhandledrejection", (event) => {
++    const reason = event?.reason;
++    ps5Log("error", "unhandled rejection", {
++      message: String(reason?.message || reason || ""),
++      stack: String(reason?.stack || "").slice(0, 1600)
++    });
++  });
++}
++
++export const Ps5Diagnostics = {
++  init() {
++    hookErrors();
++    const report = () => {
++      try {
++        ps5Log("info", "environment", collectEnvironment());
++      } catch (error) {
++        ps5Log("error", "environment probe failed", { message: String(error?.message || error) });
++      }
++    };
++    report();
++    probeHdrAnd4k()
++      .then((result) => ps5Log("info", "hdr and 4k probe", result))
++      .catch((error) => ps5Log("warn", "hdr probe failed", { message: String(error?.message || error) }));
++    // Viewport size changes when the browser window goes fullscreen.
++    let resizeTimer = null;
++    window.addEventListener("resize", () => {
++      clearTimeout(resizeTimer);
++      resizeTimer = setTimeout(() => {
++        ps5Log("info", "viewport", {
++          innerWidth,
++          innerHeight,
++          devicePixelRatio: globalThis.devicePixelRatio,
++          fullscreen: Boolean(document.fullscreenElement || document.webkitFullscreenElement)
++        });
++      }, 400);
++    });
++  }
++};
+diff --git a/js/platform/ps5/ps5Input.js b/js/platform/ps5/ps5Input.js
+new file mode 100644
+index 0000000..dcc2bc0
+--- /dev/null
++++ b/js/platform/ps5/ps5Input.js
+@@ -0,0 +1,116 @@
++import { ps5Log } from "./ps5Service.js";
++
++// PS5 system browser input, as measured on FW 13.60:
++//  - D-pad arrives as arrow keys (keyCode 37-40, sometimes 156 with key
++//    "ArrowRight"), Circle as Escape (27).
++//  - Cross is a mouse click at the on-screen cursor (left stick), not a key.
++//  - The system keyboard sends every character as keyCode 229 ("Process").
++//  - There is no Gamepad or Fullscreen API.
++// Nuvio runs in pointer-remote mode (hover focuses, click activates). This
++// module keeps the cursor and the D-pad from fighting over focus.
++
++const ARROW_CODES = new Set([37, 38, 39, 40, 156]);
++// A real cursor move shifts the pointer; WebKit also fires mousemove when the
++// page scrolls under a still cursor, which must not steal D-pad focus.
++const MIN_POINTER_TRAVEL_PX = 3;
++const MAX_LOGGED_KEYS = 60;
++
++const state = {
++  initialized: false,
++  lastArrowAt: 0,
++  lastPointerMoveAt: 0,
++  lastPointerX: null,
++  lastPointerY: null,
++  loggedKeys: 0
++};
++
++function isEditable(target) {
++  const tag = String(target?.tagName || "").toUpperCase();
++  return Boolean(target?.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT");
++}
++
++function focusedNode() {
++  const active = document.activeElement;
++  if (active && active !== document.body && active.classList?.contains("focusable")) {
++    return active;
++  }
++  return document.querySelector(".focusable.focused") || null;
++}
++
++function dispatchEnter(target) {
++  ["keydown", "keyup"].forEach((type) => {
++    const event = new KeyboardEvent(type, {
++      key: "Enter",
++      code: "Enter",
++      bubbles: true,
++      cancelable: true
++    });
++    Object.defineProperty(event, "keyCode", { value: 13 });
++    Object.defineProperty(event, "which", { value: 13 });
++    (target || document.body).dispatchEvent(event);
++  });
++}
++
++function onKey(event) {
++  if (!event.isTrusted) return;
++  const keyCode = Number(event.keyCode || event.which || 0);
++
++  // System keyboard input belongs to the text field, not to navigation.
++  if (keyCode === 229 && isEditable(event.target)) {
++    event.stopImmediatePropagation();
++    return;
++  }
++
++  if (event.type !== "keydown") return;
++  if (ARROW_CODES.has(keyCode) || String(event.key || "").startsWith("Arrow")) {
++    state.lastArrowAt = Date.now();
++  }
++  if (state.loggedKeys < MAX_LOGGED_KEYS) {
++    state.loggedKeys += 1;
++    ps5Log("info", "key", { key: event.key, code: event.code, keyCode });
++  }
++}
++
++function onPointerMove(event) {
++  if (!event.isTrusted) return;
++  const x = Number(event.screenX ?? event.clientX);
++  const y = Number(event.screenY ?? event.clientY);
++  const moved =
++    state.lastPointerX === null ||
++    Math.abs(x - state.lastPointerX) >= MIN_POINTER_TRAVEL_PX ||
++    Math.abs(y - state.lastPointerY) >= MIN_POINTER_TRAVEL_PX;
++  if (!moved) {
++    // Scroll-induced synthetic move: hide it from the focus engine.
++    event.stopImmediatePropagation();
++    return;
++  }
++  state.lastPointerX = x;
++  state.lastPointerY = y;
++  state.lastPointerMoveAt = Date.now();
++}
++
++function onClick(event) {
++  if (!event.isTrusted || isEditable(event.target)) return;
++  // After D-pad navigation the cursor may sit over some other item; Cross
++  // should act on the item the user moved focus to, like a TV remote's OK.
++  if (state.lastArrowAt <= state.lastPointerMoveAt) return;
++  const focused = focusedNode();
++  if (!focused || focused.contains(event.target)) return;
++  event.preventDefault();
++  event.stopImmediatePropagation();
++  dispatchEnter(focused);
++}
++
++export const Ps5Input = {
++  init() {
++    if (state.initialized) return;
++    state.initialized = true;
++    // Registered before FocusEngine.init(), so these capture listeners run first.
++    document.addEventListener("keydown", onKey, true);
++    document.addEventListener("keyup", onKey, true);
++    document.addEventListener("keypress", onKey, true);
++    document.addEventListener("mousemove", onPointerMove, true);
++    document.addEventListener("pointermove", onPointerMove, true);
++    document.addEventListener("click", onClick, true);
++  }
++};
+diff --git a/js/platform/ps5/ps5NativePlayer.js b/js/platform/ps5/ps5NativePlayer.js
+new file mode 100644
+index 0000000..bdd96ee
+--- /dev/null
++++ b/js/platform/ps5/ps5NativePlayer.js
+@@ -0,0 +1,77 @@
++import { Platform } from "../index.js";
++import { ps5Log, ps5ServiceRequest } from "./ps5Service.js";
++
++// The Nuvio Player: the PS5 app's built-in native player (hardware HEVC/H.264
++// up to 4K, HDR10/HLG output, Matroska, TrueHD/DTS-HD/E-AC-3 as multichannel
++// PCM, libass subtitles), with Nuvio's player interface drawn natively over
++// the picture. The browser cannot show native video under this page, so a
++// stream is handed to the app through the nuvio-ps5 payload: the app closes
++// this page, plays it, and opens Nuvio again afterwards, where
++// takeReturn() picks the session up (progress, next episode, back to the
++// screen the viewer came from).
++export const Ps5NativePlayer = {
++  available: null,
++
++  // True when the Nuvio app is polling for streams, i.e. this page is running
++  // inside it rather than in the plain PS5 browser. Asked once per page.
++  async isAvailable() {
++    if (!Platform.isPS5()) return false;
++    if (this.available !== null) return this.available;
++    try {
++      const status = await ps5ServiceRequest("/api/player/status", { timeoutMs: 3000 });
++      this.available = Boolean(status?.nativePlayer);
++    } catch (_) {
++      this.available = false;
++    }
++    return this.available;
++  },
++
++  // Hands a playback request (see the player screen's buildPs5NativeRequest)
++  // to the app. Resolves once the payload has queued it.
++  async play(request) {
++    const result = await ps5ServiceRequest("/api/player/play", {
++      method: "POST",
++      body: request,
++      timeoutMs: 8000
++    });
++    ps5Log("info", "native player: queued", {
++      id: result?.id,
++      startPosition: request?.startPosition,
++      sources: Array.isArray(request?.sources) ? request.sources.length : 0,
++      subtitleRequests: Array.isArray(request?.subtitleRequests) ? request.subtitleRequests.length : 0
++    });
++    return result;
++  },
++
++  // After Nuvio reopens: the finished playback with the context the page
++  // sent along (route stack, player params, profile), or null.
++  async takeReturn() {
++    if (!Platform.isPS5()) return null;
++    try {
++      const result = await ps5ServiceRequest("/api/player/result", { timeoutMs: 3000 });
++      if (!result || typeof result !== "object" || !result.state) return null;
++      const context = result.context && typeof result.context === "object" ? result.context : null;
++      ps5Log("info", "native player: returned", {
++        state: result.state,
++        position: result.position,
++        duration: result.duration,
++        action: result.action?.type || null,
++        hasContext: Boolean(context?.playerParams)
++      });
++      if (!context?.playerParams) return null;
++      const { context: _context, ...rest } = result;
++      return { result: rest, context };
++    } catch (_) {
++      return null;
++    }
++  }
++};
++
++// A JSON copy (plain data only), or null when the value cannot be copied.
++export function plainCopy(value) {
++  try {
++    return JSON.parse(JSON.stringify(value));
++  } catch (_) {
++    return null;
++  }
++}
+diff --git a/js/platform/ps5/ps5PluginService.js b/js/platform/ps5/ps5PluginService.js
+new file mode 100644
+index 0000000..3540cd6
+--- /dev/null
++++ b/js/platform/ps5/ps5PluginService.js
+@@ -0,0 +1,48 @@
++import { ps5ServiceRequest } from "./ps5Service.js";
++
++const PROBE_TIMEOUT_MS = 2500;
++
++// Same routes and payloads as services/plugin-http.cjs, served natively by the
++// nuvio-ps5 payload under /plugin/ so provider requests escape browser CORS.
++export const Ps5PluginService = {
++  isAvailable() {
++    return true;
++  },
++
++  async health() {
++    return ps5ServiceRequest("/plugin/health", { timeoutMs: PROBE_TIMEOUT_MS });
++  },
++
++  capabilities() {
++    return ps5ServiceRequest("/plugin/capabilities", { timeoutMs: PROBE_TIMEOUT_MS });
++  },
++
++  diagnostics() {
++    return ps5ServiceRequest("/plugin/diagnostics", { timeoutMs: PROBE_TIMEOUT_MS });
++  },
++
++  fetch(payload, { timeoutMs = 30000, signal } = {}) {
++    return ps5ServiceRequest("/plugin/fetch", {
++      method: "POST",
++      body: payload,
++      timeoutMs,
++      signal
++    });
++  },
++
++  cancel(payload) {
++    return ps5ServiceRequest("/plugin/cancel", {
++      method: "POST",
++      body: payload,
++      timeoutMs: 2000
++    }).catch(() => false);
++  },
++
++  clearCache() {
++    return ps5ServiceRequest("/plugin/cache/clear", {
++      method: "POST",
++      body: {},
++      timeoutMs: 5000
++    });
++  }
++};
+diff --git a/js/platform/ps5/ps5Remux.js b/js/platform/ps5/ps5Remux.js
+new file mode 100644
+index 0000000..bdc65dc
+--- /dev/null
++++ b/js/platform/ps5/ps5Remux.js
+@@ -0,0 +1,54 @@
++import { Platform } from "../index.js";
++import { ps5Log, ps5ServiceRequest } from "./ps5Service.js";
++import { getPs5ServiceBaseUrl } from "./ps5Service.js";
++
++// The PS5 browser plays H.264/HEVC with AAC/AC-3/E-AC-3 through MSE but not
++// Matroska, DTS, TrueHD, FLAC or Opus. The nuvio-ps5 payload repackages a
++// direct file as HLS (fMP4 segments cut on keyframes) that hls.js can play.
++export const Ps5Remux = {
++  // Inside the EVO-hosted Nuvio app, EVO's hook takes the original stream URL
++  // to its hardware player, so the browser path must not be repackaged.
++  isNativePlayerHost() {
++    return Boolean(globalThis.__evoHook);
++  },
++
++  shouldRemux(sourceType, { isHls = false, isDash = false } = {}) {
++    if (!Platform.isPS5() || this.isNativePlayerHost()) return false;
++    if (isHls || isDash) return false;
++    return !/^application\/(vnd\.apple\.mpegurl|x-mpegurl|dash\+xml)/i.test(String(sourceType || ""));
++  },
++
++  async open(url, requestHeaders = {}) {
++    try {
++      const result = await ps5ServiceRequest("/api/stream/open", {
++        method: "POST",
++        body: { url, headers: requestHeaders || {} },
++        timeoutMs: 45000
++      });
++      ps5Log("info", "remux session", {
++        id: result.id,
++        duration: result.duration,
++        segments: result.segments,
++        video: result.video,
++        audio: result.audio,
++        audioConverted: result.audioConverted
++      });
++      return {
++        id: result.id,
++        playlistUrl: `${getPs5ServiceBaseUrl()}${result.playlist}`,
++        duration: Number(result.duration || 0)
++      };
++    } catch (error) {
++      const message = String(error?.message || error);
++      ps5Log("warn", "remux unavailable", { message });
++      return { error: message };
++    }
++  },
++
++  close(id) {
++    if (!id) return;
++    ps5ServiceRequest("/api/stream/close", { method: "POST", body: { id }, timeoutMs: 3000 }).catch(
++      () => {}
++    );
++  }
++};
+diff --git a/js/platform/ps5/ps5Service.js b/js/platform/ps5/ps5Service.js
+new file mode 100644
+index 0000000..79dc703
+--- /dev/null
++++ b/js/platform/ps5/ps5Service.js
+@@ -0,0 +1,70 @@
++// The nuvio-ps5 payload serves this app and its native PS5 services from one
++// loopback origin, so every request below is same-origin and needs no CORS.
++export const PS5_SERVICE_PORT = 17600;
++
++export function isPs5UserAgent() {
++  const userAgent = String(globalThis.navigator?.userAgent || "");
++  const search = String(globalThis.location?.search || "").toLowerCase();
++  return /PlayStation 5/i.test(userAgent) || search.includes("platform=ps5");
++}
++
++export function getPs5ServiceBaseUrl() {
++  const location = globalThis.location;
++  if (
++    location &&
++    /^https?:$/.test(location.protocol) &&
++    Number(location.port) === PS5_SERVICE_PORT
++  ) {
++    return location.origin;
++  }
++  return `http://127.0.0.1:${PS5_SERVICE_PORT}`;
++}
++
++export async function ps5ServiceRequest(
++  path,
++  { method = "GET", body, timeoutMs = 30000, signal } = {}
++) {
++  const controller = typeof AbortController === "function" ? new AbortController() : null;
++  const abort = () => controller?.abort();
++  signal?.addEventListener?.("abort", abort, { once: true });
++  const timer = setTimeout(abort, timeoutMs);
++  try {
++    const response = await fetch(`${getPs5ServiceBaseUrl()}${path}`, {
++      method,
++      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
++      body: body === undefined ? undefined : JSON.stringify(body),
++      cache: "no-store",
++      signal: controller?.signal
++    });
++    const result = await response.json().catch(() => ({}));
++    if (!response.ok || result.returnValue === false) {
++      throw new Error(result.errorText || `PS5 service HTTP ${response.status}`);
++    }
++    return result;
++  } finally {
++    clearTimeout(timer);
++    signal?.removeEventListener?.("abort", abort);
++  }
++}
++
++// Fire-and-forget line for /data/nuvio/nuvio.log on the console. Used for
++// on-device diagnostics, so it must never throw or block the UI.
++export function ps5Log(level, message, details) {
++  try {
++    const line = JSON.stringify({
++      t: Date.now(),
++      level: String(level || "info"),
++      message: String(message || ""),
++      details: details === undefined ? undefined : details
++    });
++    fetch(`${getPs5ServiceBaseUrl()}/api/log`, {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: line,
++      cache: "no-store",
++      keepalive: true
++    }).catch(() => {});
++  } catch (_) {
++    // Logging is best effort.
++  }
++}
+diff --git a/ps5-boot.js b/ps5-boot.js
+new file mode 100644
+index 0000000..0505ff7
+--- /dev/null
++++ b/ps5-boot.js
+@@ -0,0 +1,236 @@
++/*
++ * PS5 boot reporter. Loads before everything else and only activates in the
++ * PS5 browser: it streams boot stages, errors, console warnings and a periodic
++ * heartbeat to the nuvio-ps5 payload (/api/log -> /data/nuvio/nuvio.log), so
++ * startup problems on the console can be diagnosed from a PC.
++ * Plain ES5 on purpose: it must run even if the main bundle cannot.
++ */
++(function installPs5BootReporter(window, document) {
++  "use strict";
++
++  var userAgent = String((window.navigator && window.navigator.userAgent) || "");
++  var search = String((window.location && window.location.search) || "").toLowerCase();
++  if (!/PlayStation 5/i.test(userAgent) && search.indexOf("platform=ps5") === -1) {
++    return;
++  }
++
++  var startedAt = Date.now();
++  var sent = 0;
++  var MAX_LINES = 400;
++  var lastStage = "";
++
++  function post(level, message, details) {
++    if (sent >= MAX_LINES) return;
++    sent += 1;
++    try {
++      var xhr = new XMLHttpRequest();
++      xhr.open("POST", "/api/log", true);
++      xhr.setRequestHeader("Content-Type", "application/json");
++      xhr.send(
++        JSON.stringify({
++          t: Date.now(),
++          ms: Date.now() - startedAt,
++          level: level,
++          message: String(message),
++          details: details
++        })
++      );
++    } catch (_) {
++      // Best effort only.
++    }
++  }
++
++  window.__NUVIO_PS5_BOOT_LOG__ = post;
++
++  /*
++   * Settings persistence. The PS5 browser dialog (the full-screen launcher)
++   * opens with empty storage every time, so Nuvio's localStorage (sign-in,
++   * addons, profiles, settings) is mirrored to the payload and restored here,
++   * before any app code reads it. Values over 512 KB are caches and skipped.
++   */
++  var STORE_URL = "/api/storage";
++  var STAMP_KEY = "__nuvioPs5StoreStamp";
++  var MAX_VALUE_CHARS = 512 * 1024;
++  var lastSaved = "";
++
++  function readItems() {
++    var items = {};
++    for (var i = 0; i < localStorage.length; i += 1) {
++      var key = localStorage.key(i);
++      if (key === STAMP_KEY) continue;
++      var value = localStorage.getItem(key);
++      if (value !== null && value.length <= MAX_VALUE_CHARS) items[key] = value;
++    }
++    return items;
++  }
++
++  function restoreStorage() {
++    try {
++      var xhr = new XMLHttpRequest();
++      xhr.open("GET", STORE_URL, false);
++      xhr.send(null);
++      if (xhr.status !== 200) return;
++      var saved = JSON.parse(xhr.responseText || "{}");
++      var localStamp = Number(localStorage.getItem(STAMP_KEY) || 0);
++      var savedStamp = Number(saved.stamp || 0);
++      if (!saved.items || savedStamp <= localStamp) {
++        lastSaved = JSON.stringify(readItems());
++        return;
++      }
++      localStorage.clear();
++      var count = 0;
++      for (var key in saved.items) {
++        if (Object.prototype.hasOwnProperty.call(saved.items, key)) {
++          localStorage.setItem(key, String(saved.items[key]));
++          count += 1;
++        }
++      }
++      localStorage.setItem(STAMP_KEY, String(savedStamp));
++      lastSaved = JSON.stringify(readItems());
++      post("info", "storage restored", { keys: count, stamp: savedStamp });
++    } catch (error) {
++      post("warn", "storage restore failed", { message: String((error && error.message) || error) });
++    }
++  }
++
++  function saveStorage(synchronous) {
++    try {
++      var serialized = JSON.stringify(readItems());
++      if (serialized === lastSaved) return;
++      var stamp = Date.now();
++      localStorage.setItem(STAMP_KEY, String(stamp));
++      var xhr = new XMLHttpRequest();
++      xhr.open("POST", STORE_URL, !synchronous);
++      xhr.setRequestHeader("Content-Type", "application/json");
++      xhr.send('{"stamp":' + stamp + ',"items":' + serialized + "}");
++      lastSaved = serialized;
++    } catch (_) {
++      // Retried on the next interval.
++    }
++  }
++
++  // Inside the Nuvio app the page comes through EVO's loopback proxy (another
++  // port); the relative URL still reaches the payload, so both share one store.
++  if (String(window.location.port) === "17600" || window.__evoHook) {
++    restoreStorage();
++    window.setInterval(function periodicSave() {
++      saveStorage(false);
++    }, 4000);
++    window.addEventListener("pagehide", function saveOnHide() {
++      saveStorage(true);
++    });
++    document.addEventListener("visibilitychange", function saveWhenHidden() {
++      if (document.visibilityState === "hidden") saveStorage(true);
++    });
++  }
++  post("info", "boot reporter start", {
++    href: String(window.location && window.location.href),
++    userAgent: userAgent,
++    innerWidth: window.innerWidth,
++    innerHeight: window.innerHeight,
++    devicePixelRatio: window.devicePixelRatio
++  });
++
++  window.addEventListener(
++    "error",
++    function onError(event) {
++      var target = event && event.target;
++      if (target && target !== window && (target.src || target.href)) {
++        post("error", "resource failed", { url: String(target.src || target.href) });
++        return;
++      }
++      post("error", "script error", {
++        message: String((event && event.message) || ""),
++        source: String((event && event.filename) || ""),
++        line: event && event.lineno,
++        column: event && event.colno,
++        stack: String((event && event.error && event.error.stack) || "").slice(0, 2000)
++      });
++    },
++    true
++  );
++
++  window.addEventListener("unhandledrejection", function onRejection(event) {
++    var reason = event && event.reason;
++    post("error", "unhandled rejection", {
++      message: String((reason && reason.message) || reason || ""),
++      stack: String((reason && reason.stack) || "").slice(0, 2000)
++    });
++  });
++
++  ["error", "warn"].forEach(function wrapConsole(level) {
++    var original = window.console && window.console[level];
++    if (typeof original !== "function") return;
++    window.console[level] = function forwardConsole() {
++      var parts = [];
++      for (var i = 0; i < arguments.length; i += 1) {
++        var value = arguments[i];
++        try {
++          parts.push(
++            value && value.stack
++              ? String(value.stack)
++              : typeof value === "object"
++                ? JSON.stringify(value)
++                : String(value)
++          );
++        } catch (_) {
++          parts.push(String(value));
++        }
++      }
++      post(level, "console." + level, { text: parts.join(" ").slice(0, 2000) });
++      return original.apply(this, arguments);
++    };
++  });
++
++  // Wrap the boot guard's stage() once boot-guard.js has installed it.
++  var stageHookTimer = window.setInterval(function hookBootGuard() {
++    var guard = window.NuvioBootGuard;
++    if (!guard || guard.__ps5Hooked) return;
++    guard.__ps5Hooked = true;
++    window.clearInterval(stageHookTimer);
++    var originalStage = guard.stage;
++    guard.stage = function reportStage(name) {
++      if (name && name !== lastStage) {
++        lastStage = String(name);
++        post("info", "boot stage", { stage: lastStage });
++      }
++      return originalStage.apply(guard, arguments);
++    };
++    var originalReady = guard.ready;
++    guard.ready = function reportReady() {
++      post("info", "boot ready", {});
++      return originalReady.apply(guard, arguments);
++    };
++    var originalFail = guard.fail;
++    guard.fail = function reportFail(message, details, code) {
++      post("error", "boot failed", {
++        message: String(message),
++        details: String(details || "").slice(0, 2000),
++        code: code
++      });
++      return originalFail.apply(guard, arguments);
++    };
++  }, 5);
++
++  var beats = 0;
++  var heartbeat = window.setInterval(function reportHeartbeat() {
++    beats += 1;
++    var guard = window.NuvioBootGuard;
++    var active = document.activeElement;
++    post("info", "heartbeat", {
++      readyState: document.readyState,
++      bootActive: Boolean(guard && guard.isActive && guard.isActive()),
++      lastStage: lastStage,
++      hash: String(window.location.hash || ""),
++      bodyClass: String((document.body && document.body.className) || "").slice(0, 200),
++      nodes: document.getElementsByTagName("*").length,
++      active: active
++        ? String(active.tagName) + "#" + String(active.id || "") + "." + String(active.className || "").slice(0, 80)
++        : "",
++      fullscreen: Boolean(document.fullscreenElement || document.webkitFullscreenElement),
++      innerWidth: window.innerWidth,
++      innerHeight: window.innerHeight
++    });
++    if (beats >= 30) window.clearInterval(heartbeat);
++  }, 10000);
++})(window, document);
+diff --git a/ps5-keytest.html b/ps5-keytest.html
+new file mode 100644
+index 0000000..8297cd3
+--- /dev/null
++++ b/ps5-keytest.html
+@@ -0,0 +1,114 @@
++<!doctype html>
++<html lang="en">
++  <head>
++    <meta charset="UTF-8" />
++    <title>Nuvio PS5 controller test</title>
++    <style>
++      :root { color-scheme: dark; }
++      html, body { margin: 0; height: 100%; background: #0d0e12; color: #f2f2f5; font: 28px/1.35 system-ui, sans-serif; }
++      main { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 24px; text-align: center; }
++      #step { font-size: 22px; color: #9aa0ad; }
++      #prompt { font-size: 48px; font-weight: 700; }
++      #seen { font-size: 22px; color: #7dd3fc; min-height: 1.4em; }
++      #done { display: none; font-size: 30px; color: #86efac; }
++      .hint { font-size: 18px; color: #6b7280; max-width: 70%; }
++    </style>
++  </head>
++  <body>
++    <main>
++      <div id="step"></div>
++      <div id="prompt">Loading…</div>
++      <div id="seen"></div>
++      <div id="done">All done. Thank you! You can close this page (PS button).</div>
++      <div class="hint">Press only the button shown. Each step moves on after the press, or after 7 seconds if nothing arrives. Do not press Triangle, OPTIONS, L3 or R3: the browser uses them itself.</div>
++    </main>
++    <script>
++      (function () {
++        var steps = [
++          "Cross (X)", "Circle (O)", "Square", "L1", "R1", "L2", "R2",
++          "D-pad UP", "D-pad DOWN", "D-pad LEFT", "D-pad RIGHT",
++          "Left stick: push RIGHT then let go", "Right stick: push DOWN then let go",
++          "Touchpad: press it", "CREATE button (left of touchpad)"
++        ];
++        var index = -1;
++        var timer = null;
++        var events = [];
++        var startedAt = Date.now();
++
++        function log(message, details) {
++          try {
++            var xhr = new XMLHttpRequest();
++            xhr.open("POST", "/api/log", true);
++            xhr.setRequestHeader("Content-Type", "application/json");
++            xhr.send(JSON.stringify({ t: Date.now(), level: "info", message: message, details: details }));
++          } catch (_) {}
++        }
++
++        function describe(event) {
++          var d = { type: event.type, ms: Date.now() - startedAt };
++          if (event.type.indexOf("key") === 0) {
++            d.key = event.key; d.code = event.code; d.keyCode = event.keyCode; d.which = event.which;
++            d.location = event.location; d.repeat = event.repeat;
++          } else if (event.type === "wheel") {
++            d.deltaX = event.deltaX; d.deltaY = event.deltaY; d.deltaMode = event.deltaMode;
++          } else if (event.type === "scroll") {
++            d.scrollX = window.scrollX; d.scrollY = window.scrollY;
++          } else {
++            d.x = event.clientX; d.y = event.clientY; d.button = event.button; d.buttons = event.buttons;
++            d.pointerType = event.pointerType;
++            d.target = event.target && event.target.id;
++          }
++          return d;
++        }
++
++        function next() {
++          clearTimeout(timer);
++          if (index >= 0) {
++            log("keytest step", { step: steps[index], events: events });
++          }
++          events = [];
++          index += 1;
++          if (index >= steps.length) {
++            document.getElementById("prompt").textContent = "";
++            document.getElementById("step").textContent = "";
++            document.getElementById("done").style.display = "block";
++            log("keytest finished", { userAgent: navigator.userAgent });
++            return;
++          }
++          document.getElementById("step").textContent = "Step " + (index + 1) + " of " + steps.length;
++          document.getElementById("prompt").textContent = "Press " + steps[index];
++          document.getElementById("seen").textContent = "";
++          timer = setTimeout(next, 7000);
++        }
++
++        var moveCount = 0;
++        function record(event) {
++          if (index < 0 || index >= steps.length) return;
++          if (event.type === "pointermove" || event.type === "mousemove") {
++            moveCount += 1;
++            if (moveCount % 10 !== 1) return;
++          }
++          events.push(describe(event));
++          document.getElementById("seen").textContent =
++            event.type + (event.key ? " " + event.key + " (" + event.keyCode + ")" : "");
++          if (event.type === "keyup" || event.type === "click" || event.type === "wheel" || event.type === "scroll") {
++            clearTimeout(timer);
++            timer = setTimeout(next, 900);
++          }
++          if (event.type === "keydown" || event.type === "keyup") {
++            event.preventDefault();
++          }
++        }
++
++        ["keydown", "keyup", "keypress", "mousedown", "mouseup", "click", "pointerdown", "pointerup",
++         "pointermove", "mousemove", "wheel", "contextmenu", "auxclick", "dblclick"].forEach(function (type) {
++          document.addEventListener(type, record, true);
++        });
++        window.addEventListener("scroll", record, true);
++        document.body.style.height = "300%";
++        log("keytest start", { innerWidth: innerWidth, innerHeight: innerHeight });
++        setTimeout(next, 800);
++      })();
++    </script>
++  </body>
++</html>

@@ -1,0 +1,9 @@
+# libSceAgcDriver — DCB submit / GPU sync.
+#
+# GL-6 (#82) deleted pp_agc.c, so this file no longer lists symbols directly.
+# --gl is the only app-module build; ps5-opengl's Gallium driver imports
+# sceAgcDriver* itself and package-app.sh appends those (harvested from the
+# ps5-opengl archives, GL_SCE_UNDEF) to this stub's generated .c. See
+# libSceAgc.syms for the full rationale.
+#
+# Add an explicit symbol below ONLY if an EVO object imports it directly.

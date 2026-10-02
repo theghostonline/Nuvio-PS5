@@ -1,0 +1,12 @@
+# libSceCommonDialog — #34, the native PS5 IME keyboard.
+#
+# The CommonDialog family (IME, save-data, message, ...) refuses to start until
+# sceCommonDialogInitialize() has been called once in the process, and there is
+# no libSceCommonDialog.so in the SDK stub set - so this is the only way an app
+# module reaches it. libSceImeDialog itself DOES have an SDK stub
+# ($PS5_SYSROOT/lib/libSceImeDialog.so) and needs no entry here.
+#
+# One symbol only: every name in this file becomes an unconditional positional
+# import, and a name absent from the firmware's .sprx makes the loader reject
+# the whole module (CE-108255-1, no log).
+sceCommonDialogInitialize

@@ -1,0 +1,16 @@
+# libSceWebBrowserDialog - #101, the system web browser (src/evo_webui.c).
+#
+# A provider's own web UI (Emby) opens in it. Linked into every player build. No SDK
+# stub .so exists for it. Names from SharpProspero
+# Interop/Dialog/WebBrowserDialog.cs, the console-tested binding.
+#
+# Exactly the six the probe calls: every name here is an unconditional
+# positional import, and a name missing from the firmware's .sprx makes the
+# loader reject the whole module (CE-108255-1, no log). If a build
+# does not start at all, suspect this file first.
+sceWebBrowserDialogInitialize
+sceWebBrowserDialogOpen
+sceWebBrowserDialogUpdateStatus
+sceWebBrowserDialogGetResult
+sceWebBrowserDialogClose
+sceWebBrowserDialogTerminate

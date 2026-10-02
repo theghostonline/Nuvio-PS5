@@ -1,0 +1,20 @@
+# libSceAvPlayer — Route A (hardware demux + decode + A/V sync).
+# Names from third_party/SharpProspero .../Interop/Media/AvPlayer.cs +
+# projects/evoplayer/media/include/sce/sce_avplayer.h.
+sceAvPlayerInit
+sceAvPlayerAddSource
+sceAvPlayerStart
+sceAvPlayerStop
+sceAvPlayerPause
+sceAvPlayerResume
+sceAvPlayerSetLooping
+sceAvPlayerIsActive
+sceAvPlayerCurrentTime
+sceAvPlayerJumpToTime
+sceAvPlayerStreamCount
+sceAvPlayerGetStreamInfo
+sceAvPlayerEnableStream
+sceAvPlayerGetAudioData
+sceAvPlayerGetVideoData
+sceAvPlayerGetVideoDataEx
+sceAvPlayerClose

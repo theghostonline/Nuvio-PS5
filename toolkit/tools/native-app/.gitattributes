@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# LF-lock the vendored native-app build tail. The EVO repo is developed on
+# Windows with core.autocrlf=true; a CRLF checkout of any of these breaks the
+# container build (shebangs, Makefile recipes, linker scripts, the compiler
+# wrapper). See the `windows-writes-break-container-scripts` memory.
+
+*           text=auto eol=lf
+*.c         text eol=lf
+*.cc        text eol=lf
+*.cpp       text eol=lf
+*.h         text eol=lf
+*.hpp       text eol=lf
+*.ld        text eol=lf
+*.map       text eol=lf
+*.sh        text eol=lf
+*.txt       text eol=lf
+*.md        text eol=lf
+*.sha256    text eol=lf
+prospero-clang18 text eol=lf
+
+# The generated shim is git-ignored, but be explicit if one is ever committed.
+*.prx       binary

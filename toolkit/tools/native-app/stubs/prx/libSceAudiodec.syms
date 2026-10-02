@@ -1,0 +1,12 @@
+# libSceAudiodec — AJM-backed compressed audio decode (AAC codec 3, MP3 codec 2).
+# Names and the public parameter/control ABI come from
+# third_party/ps5-audio-decoding-research/examples/native-audio-poc/ and
+# third_party/SharpProspero/.../Interop/Audio/Audiodec.cs.
+#
+# Only symbols media/src/evo_adec_native.c actually imports may be listed: a
+# line no object imports still becomes a forced positional PRX import, and an
+# unresolvable NID makes the loader reject the whole module (CE-108255-1).
+sceAudiodecInitLibrary
+sceAudiodecCreateDecoder
+sceAudiodecDeleteDecoder
+sceAudiodecDecode

@@ -1,0 +1,13 @@
+# libSceAudioIn - #106, the Surround Studio's AUTO CALIBRATION (MIC).
+#
+# The user-routed raw PCM capture API; the DualSense microphone arrives through
+# it (third_party/ps5-audio-decoding-research/docs/AUDIO-INPUT.md validated the
+# capture on hardware). The SDK ships no libSceAudioIn.so, so this is the only
+# way the app module can import it. /system/common/lib, not priv/lib.
+#
+# Every name here becomes an unconditional positional import - keep it to the
+# four calls core/src/services/SpeakerCalibrationService.cpp actually makes.
+sceAudioInOpen
+sceAudioInInput
+sceAudioInGetSilentState
+sceAudioInClose

@@ -1,0 +1,16 @@
+# libSceAgc — GPU command-buffer / shader ABI.
+#
+# EVERY name here becomes a POSITIONAL (unconditional DT_NEEDED) import from
+# libSceAgc.prx in the eboot. A name whose NID does not resolve on the console
+# firmware makes the dynamic loader REJECT the whole module -> "Game or App
+# Error" / CE-108255-1 before main(), no log ("crashed before KStuff pause").
+#
+# GL-6 (#82) deleted pp_agc.c (the hand-rolled sceAgc present/geo/OSD path), so
+# this file no longer lists symbols directly. --gl is the only app-module build
+# and ps5-opengl's Gallium driver imports sceAgc* itself; package-app.sh
+# harvests those from the ps5-opengl archives (GL_SCE_UNDEF) and appends them to
+# this stub's generated .c, so the stub stays populated and NEEDED without a
+# hand-maintained (and easily-stale, easily-bricking) list here.
+#
+# Add an explicit symbol below ONLY if an EVO object imports it directly and it
+# is not already in the ps5-opengl set (a link error will name it).
