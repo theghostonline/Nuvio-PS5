@@ -133,14 +133,15 @@ time Nuvio is closed.
   to 1.1.1.1 and 1.0.0.1 (Settings > Network > Settings > Set Up Internet
   Connection, your network, Advanced Settings, DNS Settings: Manual).
 - **A white screen on launch, a blank sign-in frame, or every addon red.**
-  Nuvio needs ordinary DNS lookups to work. Blocking Sony's own servers does
-  not affect it, and a console set up that way plays media normally, but some
-  of the small resolvers used for jailbreaking are slow or unreliable for
-  everything else they are asked to resolve, which shows up as a white screen
-  for up to a minute, a sign-in frame with no code, or addons in red. If you
-  see any of those, point the console at 1.1.1.1 and 1.0.0.1 (Settings >
+  Nuvio needs ordinary DNS lookups to work. Blocking Sony's own servers is
+  not itself the problem: a console set up that way plays media here normally.
+  The resolver used to do the blocking can be, though, and the symptoms are a
+  white screen for up to a minute on launch, a sign-in frame with no code, or
+  every addon in red. Which of the two it is has not been pinned down, so the
+  thing to do is test it: point the console at 1.1.1.1 and 1.0.0.1 (Settings >
   Network > Settings > Set Up Internet Connection, your network, Advanced
-  Settings, DNS Settings: Manual) and see whether it clears. Changing DNS
+  Settings, DNS Settings: Manual) and see whether it clears. If it does, the
+  resolver was the cause; if it does not, please open an issue. Changing DNS
   does not affect a jailbreak that is already running; set your own resolver
   back before the next time you jailbreak if your entry point needs it.
 - **The sign-in QR code does not appear.** The frame says when no code could
