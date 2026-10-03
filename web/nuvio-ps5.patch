@@ -512,10 +512,34 @@ index 08f5f40..31a9c3a 100644
        };
        renderRemaining();
 diff --git a/js/ui/screens/account/authQrSignInScreenMethods-03-to-friendly-email-error.js b/js/ui/screens/account/authQrSignInScreenMethods-03-to-friendly-email-error.js
-index 08dfd02..85089f4 100644
+index 08dfd02..63d8c75 100644
 --- a/js/ui/screens/account/authQrSignInScreenMethods-03-to-friendly-email-error.js
 +++ b/js/ui/screens/account/authQrSignInScreenMethods-03-to-friendly-email-error.js
-@@ -238,6 +238,10 @@ export function createAuthQrSignInScreenMethods03() {
+@@ -2,7 +2,7 @@
+ import * as internals from "./authQrSignInScreen.js";
+ 
+ export function createAuthQrSignInScreenMethods03() {
+-  const { Router, LocalStore, ScreenUtils, AuthManager, I18n, Platform, GUEST_QR_BYPASS_KEY, focusNode } = internals;
++  const { Router, LocalStore, SessionStore, ScreenUtils, AuthManager, I18n, Platform, GUEST_QR_BYPASS_KEY, focusNode } = internals;
+ 
+   return {
+     toFriendlyEmailError(rawError) {
+@@ -194,6 +194,14 @@ export function createAuthQrSignInScreenMethods03() {
+         return;
+       }
+       if (keyCode === 27 || keyCode === 461) {
++        // PS5: Circle on the first-launch sign-in gate used to drop the user
++        // into a signed-out Home with no way back to the QR code. There is
++        // nowhere to go back to, so the gate holds; "Continue without
++        // account" is the deliberate way past it.
++        if (Platform.isPS5?.() && !this.onboardingMode && !this.hasBackDestination &&
++            !SessionStore.accessToken) {
++          return;
++        }
+         this.leaveAuthScreen();
+         return;
+       }
+@@ -238,6 +246,10 @@ export function createAuthQrSignInScreenMethods03() {
          clearTimeout(this.pollTimer);
          this.pollTimer = null;
        }
@@ -1359,10 +1383,10 @@ index 0000000..0fd9455
 +};
 diff --git a/js/platform/ps5/ps5Input.js b/js/platform/ps5/ps5Input.js
 new file mode 100644
-index 0000000..716d0c4
+index 0000000..82e2a33
 --- /dev/null
 +++ b/js/platform/ps5/ps5Input.js
-@@ -0,0 +1,195 @@
+@@ -0,0 +1,223 @@
 +import { ps5Log } from "./ps5Service.js";
 +
 +// PS5 system browser input, as measured on FW 13.60:
@@ -1412,6 +1436,14 @@ index 0000000..716d0c4
 +function isEditable(target) {
 +  const tag = String(target?.tagName || "").toUpperCase();
 +  return Boolean(target?.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT");
++}
++
++// The text field a D-pad selection stands for: the node itself, or the input
++// inside it (the search row focuses a wrapper around #searchInput).
++function editableWithin(node) {
++  if (!node) return null;
++  if (isEditable(node)) return node;
++  return node.querySelector?.("input, textarea, [contenteditable]") || null;
 +}
 +
 +function focusedNode() {
@@ -1516,9 +1548,11 @@ index 0000000..716d0c4
 +}
 +
 +function onHover(event) {
-+  if (event.isTrusted && state.dpadMode) {
-+    event.stopImmediatePropagation();
-+  }
++  if (!event.isTrusted || !state.dpadMode) return;
++  // A text field is the one thing the cursor may still reach in D-pad mode:
++  // clicking it is how the keyboard is raised.
++  if (editableWithin(event.target)) return;
++  event.stopImmediatePropagation();
 +}
 +
 +function onPress(event) {
@@ -1540,7 +1574,25 @@ index 0000000..716d0c4
 +  state.redirectClick = false;
 +  if (!redirect) return;
 +  swallow(event);
-+  dispatchEnter(focusedNode());
++  const focused = focusedNode();
++  // The console's on-screen keyboard only comes up when the field is focused
++  // inside a trusted user gesture. A synthetic Enter is not one, so the
++  // search box would focus silently with no way to type into it.
++  const field = editableWithin(focused);
++  if (field) {
++    field.focus();
++    if (typeof field.setSelectionRange === "function" && field.value) {
++      const end = field.value.length;
++      try {
++        field.setSelectionRange(end, end);
++      } catch {
++        /* setSelectionRange throws on input types that have no selection */
++      }
++    }
++    setDpadMode(false);
++    return;
++  }
++  dispatchEnter(focused);
 +}
 +
 +export const Ps5Input = {

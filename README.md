@@ -132,6 +132,16 @@ time Nuvio is closed.
   everywhere, your internet provider may block its site: set the PS5's DNS
   to 1.1.1.1 and 1.0.0.1 (Settings > Network > Settings > Set Up Internet
   Connection, your network, Advanced Settings, DNS Settings: Manual).
+- **A DNS that blocks Sony also blocks Nuvio.** Several jailbreak setups
+  point the console at a DNS that blocks Sony's servers (`45.56.67.85`,
+  nanoDNS and similar) to stop updates and telemetry. Those servers also
+  refuse the domains Nuvio needs, which shows up as a white screen for up to
+  a minute on launch, a blank sign-in frame, or every addon in red. That DNS
+  is only needed to reach the exploit page while you jailbreak: once the
+  console is exploited, set DNS back to 1.1.1.1 and 1.0.0.1 and Nuvio works
+  normally. Set the blocker back before your next jailbreak if your entry
+  point relies on it. Changing DNS does not affect a jailbreak that is
+  already running.
 - **The sign-in QR code does not appear.** The frame says when no code could
   be fetched, and Nuvio keeps retrying on its own. A PS5 whose date and time
   are badly wrong cannot make secure connections: set them under Settings >
