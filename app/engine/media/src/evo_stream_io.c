@@ -6,6 +6,7 @@
  */
 #include "evo_stream_io.h"
 #include "evo_direct_mem.h"
+#include "evo_parallel_io.h"
 
 #ifdef EVO_APP_MODULE
 extern void pp_stage_bc(const char *stage_id, const char *detail);
@@ -54,6 +55,7 @@ struct evo_stream_io_ctx {
     double  deadline_at;
     int     deadline_hit;
     volatile int aborted;      /* evo_stream_io_abort: fail every blocking call */
+    evo_pio *pio;              /* parallel read-ahead, NULL when not used */
 };
 
 static double sio_now_seconds(void)
@@ -89,8 +91,11 @@ static int sio_interrupt_cb(void *opaque)
  * reconnect loop it is sitting out) return now instead of at rw_timeout. */
 void evo_stream_io_abort(evo_stream_io_ctx_t *ctx)
 {
-    if (ctx)
-        ctx->aborted = 1;
+    if (!ctx)
+        return;
+    ctx->aborted = 1;
+    /* A reader waiting on a chunk must fail now, not sit out its 30 s. */
+    evo_pio_abort(ctx->pio);
 }
 
 void evo_stream_io_set_deadline(evo_stream_io_ctx_t *ctx, double seconds)
@@ -384,6 +389,22 @@ int evo_stream_io_open(const char *path,
                                         ? EVO_STREAM_IO_NET_OPEN_DEADLINE_SEC
                                         : EVO_STREAM_IO_OPEN_DEADLINE_SEC);
 
+    /*
+     * A big file over HTTP is fetched by several connections at once. One
+     * connection is usually the limit rather than the line: Wi-Fi caps a
+     * single stream, and debrid hosts cap per connection. Falls back to
+     * FFmpeg's own reader for small files, playlists and hosts without byte
+     * ranges, which is what every source used before.
+     */
+    if (ctx->is_network && !evo_stream_io_url_is_playlist(path) &&
+        strncmp(path, "http", 4) == 0) {
+        ctx->pio = evo_pio_open(path, nuvio_stream_headers, nuvio_stream_user_agent);
+        if (ctx->pio) {
+            fmt->pb = evo_pio_avio(ctx->pio);
+            fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+        }
+    }
+
     int rc = avformat_open_input(&fmt, path, NULL, &opts);
     /* avformat_open_input frees and NULLs *fmt on failure, including on an
      * interrupted open, so there is nothing left to clean up here. */
@@ -395,6 +416,8 @@ int evo_stream_io_open(const char *path,
     av_dict_free(&opts);
 
     if (rc < 0) {
+        evo_pio_close(ctx->pio);
+        ctx->pio = NULL;
         evo_direct_mem_free(ctx);
         return rc;
     }
@@ -407,5 +430,8 @@ int evo_stream_io_open(const char *path,
 void evo_stream_io_close(evo_stream_io_ctx_t *ctx)
 {
     if (!ctx) return;
+    /* After avformat_close_input: it does not free a custom pb. */
+    evo_pio_close(ctx->pio);
+    ctx->pio = NULL;
     evo_direct_mem_free(ctx);
 }

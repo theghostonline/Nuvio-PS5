@@ -36,6 +36,11 @@ scrobbled, next episode ready.
 - 30 seconds of read-ahead for internet streams, kept in one preallocated
   block of memory; a clean pause-and-refill when the network falls behind
   instead of stuttering
+- Large files over HTTP are fetched by six connections at once into a 128 MB
+  read-ahead cache, because one connection is usually the limit rather than
+  the line: Wi-Fi caps a single stream and debrid hosts cap per connection.
+  Measured on a PS5 at 118-120 Mbit/s on a 15.7 GB remux. Small files,
+  playlists and hosts without byte ranges use the single reader as before
 - Instant seeking (0.4-0.7 s to resume on 4K), resume from Continue Watching
 - Automatic recovery: a source the hardware decoder rejects is reopened on
   the software decoder at the same point
@@ -247,9 +252,6 @@ VR-specific, so it is a port rather than new ground.
   be opened.
 - **DLNA / UPnP servers** (Plex, Jellyfin, Emby). This is the shortest route
   to the Jellyfin and Plex libraries people have asked for.
-- **Parallel read-ahead** (6 connections) for large files over the internet.
-  Nuvio reads one connection with 30 seconds of buffer, so a slow link
-  pauses to refill where PS5VR keeps up.
 - **RSS / Atom feeds** with video enclosures.
 
 **Formats**
