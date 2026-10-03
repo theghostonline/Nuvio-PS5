@@ -132,16 +132,17 @@ time Nuvio is closed.
   everywhere, your internet provider may block its site: set the PS5's DNS
   to 1.1.1.1 and 1.0.0.1 (Settings > Network > Settings > Set Up Internet
   Connection, your network, Advanced Settings, DNS Settings: Manual).
-- **A DNS that blocks Sony also blocks Nuvio.** Several jailbreak setups
-  point the console at a DNS that blocks Sony's servers (`45.56.67.85`,
-  nanoDNS and similar) to stop updates and telemetry. Those servers also
-  refuse the domains Nuvio needs, which shows up as a white screen for up to
-  a minute on launch, a blank sign-in frame, or every addon in red. That DNS
-  is only needed to reach the exploit page while you jailbreak: once the
-  console is exploited, set DNS back to 1.1.1.1 and 1.0.0.1 and Nuvio works
-  normally. Set the blocker back before your next jailbreak if your entry
-  point relies on it. Changing DNS does not affect a jailbreak that is
-  already running.
+- **A white screen on launch, a blank sign-in frame, or every addon red.**
+  Nuvio needs ordinary DNS lookups to work. Blocking Sony's own servers does
+  not affect it, and a console set up that way plays media normally, but some
+  of the small resolvers used for jailbreaking are slow or unreliable for
+  everything else they are asked to resolve, which shows up as a white screen
+  for up to a minute, a sign-in frame with no code, or addons in red. If you
+  see any of those, point the console at 1.1.1.1 and 1.0.0.1 (Settings >
+  Network > Settings > Set Up Internet Connection, your network, Advanced
+  Settings, DNS Settings: Manual) and see whether it clears. Changing DNS
+  does not affect a jailbreak that is already running; set your own resolver
+  back before the next time you jailbreak if your entry point needs it.
 - **The sign-in QR code does not appear.** The frame says when no code could
   be fetched, and Nuvio keeps retrying on its own. A PS5 whose date and time
   are badly wrong cannot make secure connections: set them under Settings >
@@ -214,6 +215,46 @@ The result is `service/nuvio-ps5.elf`.
 - Tiled 4K HEVC and 4K AV1 decode on the CPU: smooth at 24 fps, but seeking
   in them takes about two seconds.
 - The PS5 web browser alone (without the app) falls back to its own player.
+
+---
+
+## Not here yet
+
+Each of these is already working in [PS5VR](https://github.com/theghostonline/PS5VR),
+the sibling project, on the same console and the same decoder. None of it is
+VR-specific, so it is a port rather than new ground.
+
+**Picture**
+- **8K decoding.** Nuvio stops at 3840x2160. The hardware decoder takes HEVC
+  up to 7680x3840, which PS5VR plays.
+- **Frame generation.** Where the decoder cannot keep up (8K60 arrives at
+  30 fps), motion estimation on the GPU builds the frames in between. PS5VR
+  does ~55-60 pictures a second from a 30 fps decode.
+- **FSR 1 upscaling and sharpening** for sources below the panel's
+  resolution.
+- **HDR in float buffers**, so highlights stay above SDR white instead of
+  being tone-mapped.
+
+**Sound**
+- **First-order ambisonics (AmbiX)**.
+- **Automatic audio delay correction** when a decode runs slow, instead of
+  letting the two drift.
+
+**Sources**
+- **Local files**: internal storage, USB drives and extended storage. Nuvio
+  plays only what an addon hands it, so a file already on the console cannot
+  be opened.
+- **DLNA / UPnP servers** (Plex, Jellyfin, Emby). This is the shortest route
+  to the Jellyfin and Plex libraries people have asked for.
+- **Parallel read-ahead** (6 connections) for large files over the internet.
+  Nuvio reads one connection with 30 seconds of buffer, so a slow link
+  pauses to refill where PS5VR keeps up.
+- **RSS / Atom feeds** with video enclosures.
+
+**Formats**
+- **Spatial video (MV-HEVC)** and **3D Blu-ray (H.264 MVC)**. On a TV these
+  would play as one eye, which is the honest reason this is low priority
+  here and high priority there.
 
 ---
 

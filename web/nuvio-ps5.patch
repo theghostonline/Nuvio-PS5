@@ -1383,10 +1383,10 @@ index 0000000..0fd9455
 +};
 diff --git a/js/platform/ps5/ps5Input.js b/js/platform/ps5/ps5Input.js
 new file mode 100644
-index 0000000..82e2a33
+index 0000000..1c5482a
 --- /dev/null
 +++ b/js/platform/ps5/ps5Input.js
-@@ -0,0 +1,223 @@
+@@ -0,0 +1,247 @@
 +import { ps5Log } from "./ps5Service.js";
 +
 +// PS5 system browser input, as measured on FW 13.60:
@@ -1406,8 +1406,13 @@ index 0000000..82e2a33
 +// page scrolls under a still cursor, which must not steal D-pad focus.
 +const MIN_POINTER_TRAVEL_PX = 3;
 +// In D-pad mode the cursor must travel this far from where it rested before
-+// it takes over again, so a drifting stick or a nudge does not.
-+const POINTER_WAKE_PX = 40;
++// it takes over again, so a drifting stick or a nudge does not. Two people
++// asked for the cursor to be gone entirely because stray nudges were picking
++// the wrong item, so this is a deliberate shove rather than a knock.
++const POINTER_WAKE_PX = 140;
++// Which input the user last chose, so someone who only ever uses the D-pad
++// never sees the cursor again after their first launch.
++const POINTER_MODE_KEY = "ps5PointerMode";
 +const DPAD_MODE_CLASS = "ps5-dpad-mode";
 +const HOVER_EVENTS = [
 +  "mouseover",
@@ -1424,7 +1429,9 @@ index 0000000..82e2a33
 +
 +const state = {
 +  initialized: false,
-+  dpadMode: false,
++  // Hidden until the stick is moved: the D-pad is the primary control on a
++  // console, and the cursor only exists because the system browser draws it.
++  dpadMode: true,
 +  anchorX: null,
 +  anchorY: null,
 +  lastPointerX: null,
@@ -1469,6 +1476,22 @@ index 0000000..82e2a33
 +    state.anchorY = state.lastPointerY;
 +  }
 +  document.documentElement?.classList?.toggle(DPAD_MODE_CLASS, enabled);
++  try {
++    globalThis.localStorage?.setItem(POINTER_MODE_KEY, enabled ? "dpad" : "cursor");
++  } catch {
++    /* no storage in the browser dialog: the default applies next launch */
++  }
++}
++
++function restorePointerMode() {
++  let stored = null;
++  try {
++    stored = globalThis.localStorage?.getItem(POINTER_MODE_KEY);
++  } catch {
++    stored = null;
++  }
++  // Anything other than an explicit "cursor" keeps the cursor hidden.
++  setDpadMode(stored !== "cursor");
 +}
 +
 +function swallow(event) {
@@ -1599,6 +1622,7 @@ index 0000000..82e2a33
 +  init() {
 +    if (state.initialized) return;
 +    state.initialized = true;
++    restorePointerMode();
 +    // Registered before FocusEngine.init(), so these capture listeners run first.
 +    document.addEventListener("keydown", onKey, true);
 +    document.addEventListener("keyup", onKey, true);
