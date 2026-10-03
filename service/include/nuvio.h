@@ -9,7 +9,7 @@
 #include <stdint.h>
 
 /* Service version; bump with every payload release. */
-#define NUVIO_PS5_VERSION "1.7.2"
+#define NUVIO_PS5_VERSION "1.7.3"
 
 /* Must match PS5_SERVICE_PORT in the web app (js/platform/ps5/ps5Service.js)
  * and the deeplink in assets/param.json. Never change it: the browser keys
