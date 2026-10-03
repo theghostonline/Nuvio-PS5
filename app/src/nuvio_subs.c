@@ -84,26 +84,102 @@ static struct {
 
 /* ---- fonts -------------------------------------------------------------- */
 
+/*
+ * The family name a font calls itself (name table, nameID 1).
+ *
+ * This matters because the renderer is set up with ASS_FONTPROVIDER_NONE:
+ * there is no system font provider, so libass has no coverage-based fallback
+ * and will not reach a face the style did not ask for by family name. Adding
+ * a font with ass_add_font() is not enough - the style has to name it, and it
+ * has to be the name inside the file ("Noto Naskh Arabic UI", not the file
+ * stem). Measured on libass 0.17.5: an Arabic cue in a Roboto style logs
+ * "failed to find any fallback with glyph 0x645" for every character and
+ * draws .notdef boxes; the same cue in the real family name renders.
+ */
+static int font_family_name(const uint8_t *d, size_t n, char *out, size_t outn)
+{
+    if (!d || n < 12 || !out || outn < 2)
+        return -1;
+    const unsigned ntab = ((unsigned)d[4] << 8) | d[5];
+    size_t off = 0, len = 0;
+    for (unsigned i = 0; i < ntab; i++) {
+        const size_t rec = 12 + (size_t)i * 16;
+        if (rec + 16 > n)
+            return -1;
+        if (!memcmp(d + rec, "name", 4)) {
+            off = ((size_t)d[rec + 8] << 24) | ((size_t)d[rec + 9] << 16) |
+                  ((size_t)d[rec + 10] << 8) | (size_t)d[rec + 11];
+            len = ((size_t)d[rec + 12] << 24) | ((size_t)d[rec + 13] << 16) |
+                  ((size_t)d[rec + 14] << 8) | (size_t)d[rec + 15];
+            break;
+        }
+    }
+    if (len < 6 || off > n || off + len > n)
+        return -1;
+    const uint8_t *t = d + off;
+    const unsigned count = ((unsigned)t[2] << 8) | t[3];
+    const unsigned stroff = ((unsigned)t[4] << 8) | t[5];
+    for (unsigned i = 0; i < count; i++) {
+        if (6 + (size_t)i * 12 + 12 > len)
+            break;
+        const uint8_t *r = t + 6 + (size_t)i * 12;
+        const unsigned pid = ((unsigned)r[0] << 8) | r[1];
+        const unsigned nid = ((unsigned)r[6] << 8) | r[7];
+        const unsigned slen = ((unsigned)r[8] << 8) | r[9];
+        const unsigned so = ((unsigned)r[10] << 8) | r[11];
+        if (nid != 1 || (size_t)stroff + so + slen > len)
+            continue;
+        const uint8_t *v = t + stroff + so;
+        size_t k = 0;
+        if (pid == 3 || pid == 0) {                  /* UTF-16BE */
+            for (unsigned j = 1; j < slen && k + 1 < outn; j += 2)
+                if (v[j - 1] == 0 && v[j] >= 0x20)
+                    out[k++] = (char)v[j];
+        } else {
+            for (unsigned j = 0; j < slen && k + 1 < outn; j++)
+                if (v[j] >= 0x20)
+                    out[k++] = (char)v[j];
+        }
+        if (k) {
+            out[k] = 0;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+/* Family of the bundled Arabic face, read once at init. */
+static char s_family_arabic[64];
+
+static void add_font_asset_family(const char *name, ui_asset a, char *family, size_t fn)
+{
+    if (!a.data || !a.size)
+        return;
+    ass_add_font(s_lib, name, (const char *)a.data, (int)a.size);
+    if (family && font_family_name(a.data, a.size, family, fn) == 0)
+        evo_bt("subs: font %s is family '%s'", name, family);
+}
+
 static void add_font_asset(const char *name, ui_asset a)
 {
-    if (a.data && a.size)
-        ass_add_font(s_lib, name, (const char *)a.data, (int)a.size);
+    add_font_asset_family(name, a, NULL, 0);
 }
 
 /* The console's CJK / Thai fonts, added when a track needs them. */
-static void add_system_font(const char *path)
+static const char *add_system_font(const char *path)
 {
     static char added[8][64];
+    static char fams[8][64];
     static int nadded;
     struct stat st;
     for (int i = 0; i < nadded; i++)
         if (!strcmp(added[i], path))
-            return;
+            return fams[i][0] ? fams[i] : NULL;
     if (nadded >= 8 || stat(path, &st) != 0 || st.st_size <= 0)
-        return;
+        return NULL;
     int fd = open(path, O_RDONLY);
     if (fd < 0)
-        return;
+        return NULL;
     char *buf = (char *)malloc((size_t)st.st_size);
     size_t got = 0;
     while (buf && got < (size_t)st.st_size) {
@@ -112,29 +188,45 @@ static void add_system_font(const char *path)
         got += (size_t)n;
     }
     close(fd);
+    const char *family = NULL;
     if (buf && got == (size_t)st.st_size) {
         ass_add_font(s_lib, path, buf, (int)got);
         ass_set_fonts(s_rend, NULL, "Roboto", ASS_FONTPROVIDER_NONE, NULL, 0);
-        snprintf(added[nadded++], sizeof added[0], "%s", path);
-        evo_bt("subs: added font %s", path);
+        const int slot = nadded++;
+        snprintf(added[slot], sizeof added[0], "%s", path);
+        if (font_family_name((const uint8_t *)buf, got, fams[slot], sizeof fams[0]) == 0)
+            family = fams[slot];
+        evo_bt("subs: added font %s (family '%s')", path, family ? family : "?");
     }
     free(buf);
+    return family;
 }
 
-static void fonts_for_language(const char *lang)
+/*
+ * Loads the face a language needs and returns the family the style has to ask
+ * for, or NULL to leave the default alone. With no font provider there is no
+ * fallback, so naming the family is the only way the face is ever used.
+ */
+static const char *fonts_for_language(const char *lang)
 {
     if (!lang || !*lang)
-        return;
+        return NULL;
+    if (!strncasecmp(lang, "ar", 2) || !strncasecmp(lang, "ara", 3) ||
+        !strncasecmp(lang, "fa", 2) || !strncasecmp(lang, "fas", 3) ||
+        !strncasecmp(lang, "per", 3) || !strncasecmp(lang, "ur", 2) ||
+        !strncasecmp(lang, "urd", 3))
+        return s_family_arabic[0] ? s_family_arabic : NULL;   /* bundled */
     if (!strncasecmp(lang, "ja", 2) || !strncasecmp(lang, "jpn", 3))
-        add_system_font("/preinst/common/font/SSTJpPro-Regular.otf");
-    else if (!strncasecmp(lang, "ko", 2) || !strncasecmp(lang, "kor", 3))
-        add_system_font("/preinst/common/font/YoonGothicProSIE760.otf");
-    else if (!strncasecmp(lang, "zh", 2) || !strncasecmp(lang, "chi", 3) ||
-             !strncasecmp(lang, "zho", 3) || !strncasecmp(lang, "cmn", 3) ||
-             !strncasecmp(lang, "yue", 3))
-        add_system_font("/preinst/common/font/DFHEI5-SONY.ttf");
-    else if (!strncasecmp(lang, "th", 2))
-        add_system_font("/preinst/common/font/SSTThai-Roman.otf");
+        return add_system_font("/preinst/common/font/SSTJpPro-Regular.otf");
+    if (!strncasecmp(lang, "ko", 2) || !strncasecmp(lang, "kor", 3))
+        return add_system_font("/preinst/common/font/YoonGothicProSIE760.otf");
+    if (!strncasecmp(lang, "zh", 2) || !strncasecmp(lang, "chi", 3) ||
+        !strncasecmp(lang, "zho", 3) || !strncasecmp(lang, "cmn", 3) ||
+        !strncasecmp(lang, "yue", 3))
+        return add_system_font("/preinst/common/font/DFHEI5-SONY.ttf");
+    if (!strncasecmp(lang, "th", 2))
+        return add_system_font("/preinst/common/font/SSTThai-Roman.otf");
+    return NULL;
 }
 
 static void ass_log(int level, const char *fmt, va_list va, void *data)
@@ -157,7 +249,8 @@ int nuvio_subs_init(void)
     ass_set_extract_fonts(s_lib, 1);
     add_font_asset("Roboto-Regular.ttf", ui_asset_font_roboto_regular());
     add_font_asset("Roboto-Bold.ttf", ui_asset_font_roboto_bold());
-    add_font_asset("NotoNaskhArabicUI-Regular.ttf", ui_asset_font_naskh_regular());
+    add_font_asset_family("NotoNaskhArabicUI-Regular.ttf", ui_asset_font_naskh_regular(),
+                          s_family_arabic, sizeof s_family_arabic);
     add_font_asset("NotoNaskhArabicUI-Bold.ttf", ui_asset_font_naskh_bold());
     add_font_asset("Inter-Regular.ttf", ui_asset_font_inter_regular());
     if (!(s_rend = ass_renderer_init(s_lib)))
@@ -206,6 +299,33 @@ static void apply_style(ASS_Track *t)
             s->Shadow = s_style.outline ? 1.2 : 0.0;
         }
         s->MarginV = (int)(54 + 10.8 * s_style.offset_pct);
+    }
+}
+
+/*
+ * Point a synthesized text track's styles at `family`. Only for tracks whose
+ * header we wrote ourselves (SRT, WebVTT, addon subtitles): an authored ASS
+ * file names its own fonts and we leave the author's choice alone.
+ */
+static void set_track_font(strack *t, const char *family)
+{
+    if (!t || !t->ass || t->ass_raw || !family || !*family)
+        return;
+    int changed = 0;
+    for (int i = 0; i < t->ass->n_styles; i++) {
+        ASS_Style *st = &t->ass->styles[i];
+        if (st->FontName && !strcmp(st->FontName, family))
+            continue;
+        char *dup = strdup(family);
+        if (!dup)
+            continue;
+        free(st->FontName);
+        st->FontName = dup;
+        changed = 1;
+    }
+    if (changed) {
+        s_style_gen++;          /* the cached render is for the old face */
+        evo_bt("subs: track font -> '%s'", family);
     }
 }
 
@@ -380,6 +500,7 @@ void nuvio_subs_open(AVFormatContext *fmt, int video_stream)
         } else {
             t->dec = open_decoder(par, st->time_base, NULL);
             t->ass = new_text_track();
+            set_track_font(t, fonts_for_language(t->info.lang));
         }
         if (!t->ass && !t->dec) {
             evo_bt("subs: stream %u (%s) has no decoder", i, t->info.codec);
@@ -440,7 +561,7 @@ void nuvio_subs_select(int id)
         id = -1;
     if (id >= 0) {
         strack *t = &s_tracks[id];
-        fonts_for_language(t->info.lang);
+        set_track_font(t, fonts_for_language(t->info.lang));
         if (t->info.bitmap) {
             /* Bitmap tracks decode only while selected: start clean. */
             free_events(t);
@@ -809,8 +930,10 @@ static int load_external(strack *t, const char *url, const char *headers)
                                       st->codecpar->extradata_size);
     } else {
         t->dec = open_decoder(st->codecpar, st->time_base, charenc);
-        if (!t->info.bitmap)
+        if (!t->info.bitmap) {
             t->ass = new_text_track();
+            set_track_font(t, fonts_for_language(t->info.lang));
+        }
         t->src_w = st->codecpar->width;
         t->src_h = st->codecpar->height;
     }
@@ -889,7 +1012,7 @@ static void *ext_loader(void *arg)
                 info.state = 1;
                 t->info = info;
                 if (s_selected == id)
-                    fonts_for_language(t->info.lang);
+                    set_track_font(t, fonts_for_language(t->info.lang));
             } else {
                 free_track(&work);
                 t->info.state = -1;
